@@ -42,6 +42,12 @@ window.__ModuleLoader__.load({
     const ROW_NS = 'model-manager';
     const ROLES = ['main', 'planning', 'execution', 'vision'];
     const MODES = ['hybrid', 'managed', 'advisory'];
+    /**
+     * How long to wait for the session-scoped catalog before relying on the
+     * global `remote.llm` directory alone. It is a bonus source (it carries
+     * reasoning efforts), never a gate.
+     */
+    const SESSION_CATALOG_TIMEOUT_MS = 4000;
 
     const en = {
       title: 'Model manager',
@@ -282,51 +288,88 @@ window.__ModuleLoader__.load({
         return { groups, failures };
       };
 
+      /**
+       * Load the model catalog.
+       *
+       * Both sources run *concurrently* on purpose. `remote.session.modelCatalog()`
+       * is served through the session namespace: it carries each model's reasoning
+       * efforts, but with no session open it can reject or never settle, so
+       * awaiting it first would gate the whole card — which is exactly how the
+       * pickers ended up empty in the Settings panel. The global `remote.llm`
+       * directory always answers and is therefore the floor; the session catalog
+       * only upgrades the result when it arrives in time.
+       */
+      const withTimeout = (promise, ms) => Promise.race([
+        promise,
+        new Promise((resolve) => { setTimeout(() => resolve(undefined), ms); }),
+      ]);
+
+      const fromSessionCatalog = async () => {
+        try {
+          const response = await withTimeout(ctx.remote.session.modelCatalog(), SESSION_CATALOG_TIMEOUT_MS);
+          if (response === undefined) return { timedOut: true };
+          if (response.ok) {
+            const value = response.value ?? {};
+            return {
+              groups: Array.isArray(value.groups) ? value.groups : [],
+              failures: Array.isArray(value.failures) ? value.failures : [],
+            };
+          }
+          return { error: response.error === undefined ? 'refused without a reason' : String(response.error) };
+        } catch (error) {
+          return { error: error?.message ?? String(error) };
+        }
+      };
+
+      const fromLlmDirectory = async () => {
+        try {
+          return await loadCatalogFromLlm();
+        } catch (error) {
+          return { groups: [], failures: [], error: error?.message ?? String(error) };
+        }
+      };
+
       const loadCatalog = async () => {
         const mine = ++generation;
         publish({ status: 'loading', groups: [], failures: [], error: undefined });
 
-        // Preferred source: it also carries each model's reasoning efforts.
-        let groups = [];
-        let failures = [];
-        let error;
-        try {
-          const response = await ctx.remote.session.modelCatalog();
-          if (mine !== generation) return;
-          if (response && response.ok) {
-            const value = response.value ?? {};
-            groups = Array.isArray(value.groups) ? value.groups : [];
-            failures = Array.isArray(value.failures) ? value.failures : [];
-          } else if (response) {
-            error = response.error;
-          }
-        } catch (caught) {
-          if (mine !== generation) return;
-          error = caught?.message ?? String(caught);
-        }
-        if (mine !== generation) return;
+        const sessionPromise = fromSessionCatalog();
+        const directoryPromise = fromLlmDirectory();
 
-        // Nothing usable from the session namespace → try the global directory.
-        if (groups.length === 0) {
-          try {
-            const fallback = await loadCatalogFromLlm();
-            if (mine !== generation) return;
-            if (fallback.groups.length > 0) {
-              groups = fallback.groups;
-              failures = fallback.failures;
-              error = undefined;
-            } else if (fallback.failures.length > 0) {
-              failures = fallback.failures;
-            }
-          } catch (caught) {
-            if (mine !== generation) return;
-            if (error === undefined) error = caught?.message ?? String(caught);
-          }
-        }
+        // Publish the global directory the moment it lands, so the pickers are
+        // usable even when the session catalog never settles.
+        const directory = await directoryPromise;
         if (mine !== generation) return;
-        publish(groups.length === 0 && error !== undefined
-          ? { status: 'error', groups: [], failures, error }
-          : { status: 'ready', groups, failures, error: undefined });
+        const directoryOk = Array.isArray(directory.groups) && directory.groups.length > 0;
+        if (directoryOk) {
+          publish({ status: 'ready', groups: directory.groups, failures: directory.failures ?? [], error: undefined });
+        }
+
+        // Then let the session catalog upgrade the result: it is the only source
+        // that carries each model's reasoning efforts.
+        const session = await sessionPromise;
+        if (mine !== generation) return;
+        const sessionOk = Array.isArray(session.groups) && session.groups.length > 0;
+        if (sessionOk) {
+          publish({ status: 'ready', groups: session.groups, failures: session.failures ?? [], error: undefined });
+          return;
+        }
+        if (directoryOk) return;   // already published; the session catalog added nothing
+
+        // Neither source produced models. Report what each one actually did, so
+        // an empty picker says why instead of leaving it to guesswork.
+        const sessionNote = session.timedOut === true
+          ? `timed out after ${SESSION_CATALOG_TIMEOUT_MS}ms (no session open?)`
+          : (session.error ?? 'returned no groups');
+        const directoryNote = directory.error
+          ?? `returned no groups${(directory.failures ?? []).length > 0
+            ? ` (${directory.failures.length} provider failure(s))` : ''}`;
+        publish({
+          status: 'error',
+          groups: [],
+          failures: [...(session.failures ?? []), ...(directory.failures ?? [])],
+          error: `no models from either source — session catalog: ${sessionNote}; llm directory: ${directoryNote}`,
+        });
       };
 
       // A client half that throws while applying leaves the card unregistered,

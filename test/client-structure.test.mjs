@@ -110,6 +110,48 @@ const checks = [
   ['every registration carries name', registerCalls.every((r) => typeof r.options?.name === 'string')],
 ];
 
+// ---- catalog sourcing ------------------------------------------------------
+// Regression: the session-scoped catalog is served through the session
+// namespace and may never settle when no session is open. It must be a bonus
+// source, never a gate — awaiting it first is what once left the pickers empty
+// in the Settings panel.
+const llmCalls = [];
+let unhandled = null;
+process.on('unhandledRejection', (reason) => { unhandled = reason; });
+
+const hangCtx = {
+  effect(fn) { const d = fn(); return () => { if (typeof d === 'function') d(); }; },
+  inject(deps, cb) { const scoped = Object.create(hangCtx); return cb(scoped); },
+  locale: { register: () => () => {}, bind: () => (key) => key },
+  slots: { inject: (name, cb) => cb(), register: () => () => {} },
+  remote: {
+    $on: () => () => {},
+    session: { modelCatalog: () => new Promise(() => {}) },   // never settles
+    llm: {
+      listConfigurableProviders: async () => {
+        llmCalls.push('listConfigurableProviders');
+        return { ok: true, value: [{ provider: 'pku-corpus', displayName: 'PKU Corpus Program', settingsNs: 'llm-pi-ai' }] };
+      },
+      discoverModels: async (ns, request) => {
+        llmCalls.push(`discoverModels:${ns}:${request?.provider}`);
+        return { ok: true, value: [{ id: 'qwen3.8-flash', name: 'qwen3.8-flash', inputModalities: ['text'] }] };
+      },
+    },
+  },
+};
+exported.apply(hangCtx);
+await new Promise((r) => setTimeout(r, 80));
+
+checks.push(
+  ['a hanging session catalog does not gate the llm directory',
+    llmCalls.includes('listConfigurableProviders')
+      && llmCalls.some((c) => c.startsWith('discoverModels:llm-pi-ai:pku-corpus'))],
+  ['discoverModels is called with the provider settings namespace',
+    llmCalls.includes('discoverModels:llm-pi-ai:pku-corpus')],
+  ['the catalog load leaves no unhandled rejection', unhandled === null],
+);
+if (llmCalls.length > 0) console.log(`\n7. llm directory calls under a hanging session catalog: ${JSON.stringify(llmCalls)}`);
+
 console.log('');
 let failed = 0;
 for (const [label, ok] of checks) {
