@@ -6,6 +6,9 @@
   "description": "Role-based model manager for DeepSeek Harness: assign models to planning, execution, vision and main roles, route subagent work by role, and report which model every subagent used.",
   "license": "MIT",
   "main": "./lib/index.js",
+  "scripts": {
+    "test": "node test/run-all.mjs"
+  },
   "meta": {
     "title": "Model manager",
     "description": "Assign models to planning, execution, vision and main roles, and see which model each subagent used."
@@ -39,7 +42,9 @@
       "platform": "web",
       "immediately": true,
       "inject": [
-        "@deepseek-ai/dsh-client-ui-plugin-manager"
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-api-remotes"
       ]
     }
   }

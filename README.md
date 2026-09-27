@@ -22,25 +22,53 @@ configuration card to the Plugins page. There is no build step for either half.
 
 ## Install
 
-The package is a local bundle directory. Absolute path:
+Clone it, then install the directory into a profile:
 
-```text
-/Users/shangguan/Softwares/my_modules/dsh-plugins/dsh-model-manager
+```bash
+git clone https://github.com/jyshangguan/dsh-model-manager.git
+cd dsh-model-manager
 ```
 
 | File | Purpose |
 | --- | --- |
-| `lib/index.js` | Host half: Cordis identity `model-manager`, exported `Config`, `apply`, the `agent/request` routing and the `model_manager` tool. |
-| `client.js` | Client half: the Web UI configuration card, contributed to the row's page on the Plugins page. |
+| `lib/index.js` | Host half: Cordis identity `model-manager`, exported `Config`, `apply`, the `agent/request` routing, the `agent/request-error` failover, and the `model_manager` tool. |
+| `client.js` | Client half: the configuration card, contributed as a page in the Settings panel. |
 | `locale/en.json`, `locale/zh.json` | Display metadata only — the bundle's `title` and `description` in the plugin list. |
 | `cordis.patch.yml` | Bundle layer: inserts exactly one row, id `model-manager`. |
 | `package.json` | Package `dsh-model-manager`, declaring `dsh.bundle.patch` and `dsh.client`. |
+| `test/` | The test suite; `npm test` runs all of it. See [Testing](#testing). |
 
-Install it into a profile either with the harness plugin manager (`plugin_manager` with
-`action: "install_bundle"` and `target` set to the path above) or on the CLI:
+### Making the schema dependency resolvable
+
+`@deepseek-ai/schemastery` is declared as an **optional peer**: the harness ships it, and this
+package deliberately does not install its own copy, so the `Config` schema is built by the same
+schemastery instance the loader validates with.
+
+But a path-based install is *linked*, not copied, so Node resolves this package's imports from
+its own directory upward — which never reaches the profile's `node_modules`. Point it at the
+harness's copy once per machine:
 
 ```bash
-dsh plugin --profile web add /Users/shangguan/Softwares/my_modules/dsh-plugins/dsh-model-manager
+mkdir -p node_modules/@deepseek-ai
+ln -s "$(npm root -g)/@deepseek-ai/dsh/node_modules/@deepseek-ai/schemastery" \
+      node_modules/@deepseek-ai/schemastery
+```
+
+`npm root -g` is the global install root; adjust if your `dsh` lives somewhere else.
+`node_modules/` is git-ignored, so this step is not carried by the repository.
+
+Skipping it does not break the plugin: `Config` degrades to `undefined`, cordis's
+`resolveConfig` passes the raw config straight through, and routing keeps working. What you
+lose is the Settings card — the harness only serves a settings namespace for a row that has a
+Config schema, so the card would report the namespace as unavailable.
+
+### Installing into a profile
+
+Either with the harness plugin manager (`plugin_manager` with `action: "install_bundle"` and
+`target` set to this directory's absolute path) or on the CLI:
+
+```bash
+dsh plugin --profile web add /absolute/path/to/dsh-model-manager
 ```
 
 Both paths run a package install inside the profile directory. The plugin manager then
@@ -84,7 +112,7 @@ here instead of in your running server:
 # smoke.patch.yml
 - insert:
     - id: model-manager-smoke
-      name: '/Users/shangguan/Softwares/my_modules/dsh-plugins/dsh-model-manager/lib/index.js'
+      name: '/absolute/path/to/dsh-model-manager/lib/index.js'
       config:
         roles:
           planning:
@@ -883,6 +911,37 @@ degrades to a notice or a log line.
   loader entry id that would abort startup.
 - **The `model_manager` tool is read-only.** Its description says so and the
   implementation only reads state.
+
+## Testing
+
+```bash
+npm test
+```
+
+Runs five suites in child processes and aggregates the result — **565 assertions** at the time
+of writing. Each suite also runs on its own: `node test/<name>.test.mjs`.
+
+| Suite | Assertions | What it pins |
+| --- | --- | --- |
+| `routing.test.mjs` | 9 | The four roles route as documented; label classification; an explicit child route is respected; the tool and system-prompt section register; `apply` survives malformed configs. |
+| `edge.test.mjs` | 503 | Hostile configs, keyword anchoring and trimming, explicit-`[]`-disables versus absent-uses-defaults, round-robin committing only on apply, LRU eviction, the manager-owned rule, volatile settings reload, every `reason` string, the report/usage/routes output, and the generated allow-list YAML round-tripped through the **real** harness validator. |
+| `failover.test.mjs` | 24 | The failover chain and every guard: it walks to the end of the list and then stops rather than wrapping; `ABORTED`, `INVALID_REQUEST` and `IMAGE_OFFLOAD_REQUIRED` never fail over; a downstream recovery decision is passed through untouched; the per-step cap holds and resets on a new step; `round-robin` does wrap; single-model and disabled roles do nothing; a route outside the role's list is left alone; hostile payloads never throw; subagent chains fail over too. |
+| `client-structure.test.mjs` | 12 | The client half loads through `window.__ModuleLoader__`, requires **only** `react`, exports `{ inject, apply }`, registers its locale dictionaries and exactly one slot — and, because the check mirrors the real `SlotCore.register` validation, it fails if a registration ever loses its `name`. |
+| `client-diagnostic.test.mjs` | 17 | Every branch of `model_manager` with `action: "client"`, including the two that matter most: a bundle the Host will not serve, and a bundle that serves but registers the wrong id. |
+
+The suites are plain Node scripts — no test framework, and no dependency beyond Node itself.
+
+Two of them optionally pin their expectations against the **real** harness internals rather
+than a transcription of them: `dsh-subagent`'s `resolveChildAgentOptions` (what a delegated
+child actually inherits) and `SubagentModelSelectionConfig.current` (the allow-list gate that
+rejects a repeated route). `test/paths.mjs` discovers the DSH installation from the `dsh`
+executable on `PATH`, or from `DSH_INSTALL_DIR` if you set it. When neither resolves, those
+assertions fall back to a local re-implementation and print a `WARN` — the suite still passes,
+but it is then testing my model of the harness rather than the harness, so prefer running it
+where `dsh` is installed.
+
+Nothing in the suite touches the network, a profile, or a running harness, and nothing writes
+outside the repository.
 
 ## Limitations
 
