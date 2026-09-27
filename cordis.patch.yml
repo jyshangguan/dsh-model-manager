@@ -1,0 +1,36 @@
+# dsh-model-manager bundle patch (mount-only).
+#
+# This patch inserts only this plugin's own row. It deliberately does NOT touch
+# the `subagent-model-selection-settings` row: that row is already present in
+# most profiles, and inserting a second row with the same id aborts startup with
+# "duplicate loader entry id".
+#
+# The manager instead *reads* that row's allow-list and reports any role route
+# that the delegation tool would refuse (use the `model_manager` tool with
+# action "routes" to see the exact list to add).
+#
+# Override this row's config from the profile's own cordis.patch.yml by id
+# `model-manager`, or edit it live on the Settings page (the schema is volatile).
+- insert:
+    - id: model-manager
+      name: 'dsh-model-manager'
+      config:
+        roles:
+          # Main agent outside plan mode. Empty = leave the composer choice alone.
+          main:
+            models: []
+          # Plan mode (and delegations labelled as planning/reasoning work).
+          planning:
+            models:
+              - provider: pku-corpus
+                model: qwen3.8-max-0902
+          # Default tier for delegated implementation work.
+          execution:
+            models:
+              - provider: pku-corpus
+                model: qwen3.8-flash
+          # Image / screenshot / OCR work. Empty falls back to `execution`.
+          vision:
+            models: []
+        strategy:
+          mode: hybrid

@@ -1,0 +1,46 @@
+{
+  "name": "dsh-model-manager",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Role-based model manager for DeepSeek Harness: assign models to planning, execution, vision and main roles, route subagent work by role, and report which model every subagent used.",
+  "license": "MIT",
+  "main": "./lib/index.js",
+  "meta": {
+    "title": "Model manager",
+    "description": "Assign models to planning, execution, vision and main roles, and see which model each subagent used."
+  },
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "client.js",
+    "locale/*.json",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": "^3.18.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
+      ]
+    }
+  }
+}
