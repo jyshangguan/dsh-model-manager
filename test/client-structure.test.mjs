@@ -95,6 +95,22 @@ console.log('5. configForms.get called with:', JSON.stringify(configFormGets));
 console.log('   whileServed gated on     :', JSON.stringify(whileServedCalls));
 console.log('6. remote subscriptions:', JSON.stringify(remoteOns));
 
+// Static guard: every `ctx.remote.<ns>` the client half touches must be declared
+// in `inject`. Each namespace is a separate cordis service mounted by its own
+// package, so declaring only `remote` lets `apply` run before they exist — which
+// is what once left every model picker empty.
+const clientSource = readFileSync(SRC, 'utf8');
+const usedNamespaces = new Set(
+  [...clientSource.matchAll(/ctx\.remote\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]),
+);
+usedNamespaces.delete('$on');   // a method on the remote service, not a namespace
+const declaredNamespaces = new Set(
+  exported.inject.filter((n) => n.startsWith('remote.')).map((n) => n.slice('remote.'.length)),
+);
+const undeclaredNamespaces = [...usedNamespaces].filter((ns) => !declaredNamespaces.has(ns));
+console.log(`   remote namespaces used: ${JSON.stringify([...usedNamespaces])}`);
+console.log(`   declared in inject  : ${JSON.stringify([...declaredNamespaces])}`);
+
 const checks = [
   ['factory id is the package name', captured?.id === 'dsh-model-manager'],
   ['only react is required', required.every((n) => n === 'react')],
@@ -108,6 +124,9 @@ const checks = [
   ['settings page registered without a whileServed gate', whileServedCalls.length === 0],
   ['adapter invalidation subscribed', remoteOns.includes('llm/adapters-updated')],
   ['every registration carries name', registerCalls.every((r) => typeof r.options?.name === 'string')],
+  ['inject declares remote.llm and remote.session',
+    exported.inject.includes('remote.llm') && exported.inject.includes('remote.session')],
+  ['every ctx.remote.<ns> used is declared in inject', undeclaredNamespaces.length === 0],
 ];
 
 // ---- catalog sourcing ------------------------------------------------------

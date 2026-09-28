@@ -720,7 +720,12 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      inject: ['slots', 'locale', 'remote'],
+      // Each `remote.<namespace>` is its own cordis service, installed when the
+      // package contributing it applies — `remote` itself existing does not mean
+      // `remote.llm` or `remote.session` do. Declaring them here parks this half
+      // until they are mounted. Without that, `apply` ran first and both were
+      // `undefined`, which is exactly what emptied the model pickers.
+      inject: ['slots', 'locale', 'remote', 'remote.llm', 'remote.session'],
       apply,
     };
   },
