@@ -541,13 +541,50 @@ The bundled layer this package ships is:
 
 ## Seeing which model each subagent used
 
-The plugin registers one read-only tool, `model_manager`, with three actions:
+### First: the harness already shows this per Turn
+
+Before reaching for the tool, note that the Web UI already attributes each completed Turn to
+the exact provider/model that served it. On every completed Turn's footer there is a button
+labelled **用量 {total}** ("Usage {total}", with a database icon); clicking it opens the
+**本轮用量** ("Turn usage") dialog, whose rows are Uncached input, Output (with its reasoning
+subset), Cached input, Cache write, Cache hit, and **Provider / model**.
+
+Two conditions decide whether it appears:
+
+- **Settings → General → Performance & usage** must be `detailed`, not `compact`. `detailed`
+  is the default. `compact` hides per-Turn usage entirely.
+- Accounting is deliberately all-or-nothing. A Turn discloses usage only when the loaded
+  window includes `turn/start` and **every** started model attempt reported safe, exact
+  usage. The harness hides a partial total rather than showing a misleading one.
+
+That second rule interacts with this plugin's failover, and it is worth understanding before
+filing it as a bug: a failed attempt settles as an `assistant/attempt` event, which carries no
+token usage unless its stream reported some. `deriveTurnTokenUsage` then marks the whole Turn
+invalid and discloses nothing. So **on a Turn where a model failed and the manager switched to
+another, the usage row will be absent** — the accounting genuinely cannot prove an exact total
+for that Turn. This is the harness's own rule and it applies equally to the harness's built-in
+retries; failover simply produces such Turns more often.
+
+There is no per-model **aggregate for one whole session** anywhere in the UI: the session-level
+projections (`tokenUsage`, `contextPressure`, `contextBreakdown`) accumulate four token buckets
+without splitting them by route. That gap is why this plugin keeps its own counters.
+
+### The tool
+
+The plugin registers one read-only tool, `model_manager`, with four actions:
 
 | Action | Returns |
 | --- | --- |
 | `report` (default) | Per-subagent table: child id, role, model, reason, live status, delegation label, then the active mode and subagent-only totals by role/model. |
 | `routes` | Role table (role, `pick`, effective models, role `note`), active mode, allow-list audit with a YAML snippet for unlisted routes, the vision image-capability check, and the first 8 keywords of each list. |
 | `usage` | Request and subagent counts per role/model across the whole process, including top-level turns. |
+| `client` | Whether the Host composed this package's Web client half into the browser boot graph, the route serving its bundle, and the current graph revision. Use it when the settings card does not appear. |
+
+Both `report` and `usage` read **process-local in-memory state**: they answer for the current
+`dsh` process only, and a restart clears them. A subagent that finished before a restart
+therefore reappears as `(not yet routed)` with role `?`, because it was re-registered on resume
+but issued no request in this process. For history that survives a restart, use the per-Turn
+usage dialog described above — it is derived from the durable session log.
 
 Asking for the report:
 

@@ -675,12 +675,23 @@ window.__ModuleLoader__.load({
       // gate would hide the page entirely and a packaging problem would look
       // exactly like a missing feature. The entry is therefore always reachable,
       // and the card itself reports why it cannot show values.
-      safely('settings page', () => use(() => ctx.slots.inject('settings.section', () => ctx.slots.register({
-        name: 'settings.section',
-        id: 'model-manager',
-        order: 50,
-        label: () => t('title'),
-      }, Card)), 'model-manager: settings page'));
+      safely('settings page', () => use(() => ctx.slots.inject('settings.section', () => {
+        const disposer = ctx.slots.register({
+          name: 'settings.section',
+          id: 'model-manager',
+          order: 50,
+          label: () => t('title'),
+        }, Card);
+        // A positive line at the moment the card actually lands. The apply-time
+        // summary below cannot know whether this ran: `slots.inject` waits for the
+        // owning declaration, so a count taken there would read 0 even on success.
+        try {
+          console.log('[model-manager] settings card registered');
+        } catch {
+          /* logging is best-effort */
+        }
+        return disposer;
+      }), 'model-manager: settings page'));
 
       // Bind the shared per-namespace form when the Host serves it. This runs at
       // apply time, well before the user can navigate to the page, so the card's
@@ -697,7 +708,7 @@ window.__ModuleLoader__.load({
       // from "applied but a step failed" (each failed step logs its own
       // `[model-manager] <step>: <error>` warning immediately above this).
       try {
-        console.log('[model-manager] client half applied; locale + 3 surfaces attempted');
+        console.log('[model-manager] client half applied; locale registered, 1 surface awaited (settings page)');
       } catch {
         /* logging is best-effort */
       }
