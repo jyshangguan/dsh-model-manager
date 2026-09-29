@@ -317,6 +317,33 @@ populates once the client-module boot manifest has been rebuilt.
 `hybrid` is what makes per-delegation choices work: pass nothing and the role decides;
 pass an explicit `provider`/`model` to the delegation tool and your choice survives.
 
+### `main` and the composer's model picker
+
+These are two different mechanisms, and they used to collide: the composer writes the
+session's own route (`session.selectModel`), while the manager rewrote it at request time
+whenever `main` was configured — so the picker kept displaying a model that was never used.
+
+In `hybrid` the manager now backs off when you have actually chosen. The test is
+**durable, not a guess**: selecting a model in the composer appends a
+`model/selection` event to the session log — that event has exactly one append site in the
+whole install (`selectForNextRequest`) — and this plugin folds it into a
+`modelManagerSelection` session projection. A session with such an event keeps your pick and
+records `explicit session selection (respected)`; a session that never had one is running on
+the deployment default, which is the route `main` exists to replace.
+
+Three things follow from that. `managed` is unchanged — it means "the manager owns every
+route", including a session you picked by hand. A respected selection **does not consume the
+round-robin rotation**, because rotation commits only when a route is applied; the first
+request the manager does take over still gets the first model. And the choice survives a
+restart, a resume and a fork, because it is read from the log rather than remembered in
+process state.
+
+One caveat worth knowing: **the composer's picker also overwrites the deployment default**
+(implementation note: `selectModel` calls `selectForNextRequest` *and*
+`agentDefaultModel.saveSelection` in the same action). Picking a model for one session
+therefore changes what brand-new sessions start on too, which is the harness's behaviour, not
+this plugin's.
+
 ### What "inherited" means
 
 Three rules decide whether a subagent request is treated as inherited.
@@ -660,6 +687,7 @@ The `reason` column is the outcome for that request:
 | --- | --- |
 | `applied` | The role route was written into the request. |
 | `applied (manager-owned)` | The child's route matched what the manager last applied to it, so it stayed under management and the role route was written again. |
+| `explicit session selection (respected)` | `hybrid`, top-level: the session log carries a `model/selection` event, so the model running is one a person chose in the composer. `main` is skipped and the rotation is not advanced. |
 | `explicit child route (respected)` | `hybrid` found the child's resolved route differed from the parent's effective route, so it was treated as the delegating agent's own choice and left alone. |
 | `lineage unresolved (child route respected)` | No delegating parent could be resolved and the child was not manager-owned, so inheritance was not provable and the child kept its route. |
 | `advisory (not applied)` | `advisory` mode classified the request but changed nothing; the model shown is the one actually used. |
@@ -972,7 +1000,7 @@ degrades to a notice or a log line.
 npm test
 ```
 
-Runs six suites in child processes and aggregates the result — **604 assertions** at the time
+Runs seven suites in child processes and aggregates the result — **638 assertions** at the time
 of writing. Each suite also runs on its own: `node test/<name>.test.mjs`.
 
 | Suite | Assertions | What it pins |
@@ -980,9 +1008,10 @@ of writing. Each suite also runs on its own: `node test/<name>.test.mjs`.
 | `routing.test.mjs` | 9 | The four roles route as documented; label classification; an explicit child route is respected; the tool and system-prompt section register; `apply` survives malformed configs. |
 | `edge.test.mjs` | 503 | Hostile configs, keyword anchoring and trimming, explicit-`[]`-disables versus absent-uses-defaults, round-robin committing only on apply, LRU eviction, the manager-owned rule, volatile settings reload, every `reason` string, the report/usage/routes output, and the generated allow-list YAML round-tripped through the **real** harness validator. |
 | `failover.test.mjs` | 24 | The failover chain and every guard: it walks to the end of the list and then stops rather than wrapping; `ABORTED`, `INVALID_REQUEST` and `IMAGE_OFFLOAD_REQUIRED` never fail over; a downstream recovery decision is passed through untouched; the per-step cap holds and resets on a new step; `round-robin` does wrap; single-model and disabled roles do nothing; a route outside the role's list is left alone; hostile payloads never throw; subagent chains fail over too. |
-| `client-structure.test.mjs` | 20 | The client half loads through `window.__ModuleLoader__`, requires **only** `react`, exports `{ inject, apply }`, registers its locale dictionaries and exactly two surfaces, and — because the check mirrors the real `SlotCore.register` validation — fails if a registration ever loses its `name`. It also declares each `remote.<namespace>` used must appear in `inject`, drives the settings-form bindings, and renders the usage surface against a stubbed projection face in both its collapsed and expanded states, with an empty-projection case proving those render assertions are not vacuous. |
+| `client-structure.test.mjs` | 32 | The client half loads through `window.__ModuleLoader__`, requires **only** `react`, exports `{ inject, apply }`, registers its locale dictionaries and exactly two surfaces, and — because the check mirrors the real `SlotCore.register` validation — fails if a registration ever loses its `name`. It also declares each `remote.<namespace>` used must appear in `inject`, drives the settings-form bindings, and renders the usage surface against a stubbed projection face in both its collapsed and expanded states, with an empty-projection case proving those render assertions are not vacuous. |
 | `client-diagnostic.test.mjs` | 17 | Every branch of `model_manager` with `action: "client"`, including the two that matter most: a bundle the Host will not serve, and a bundle that serves but registers the wrong id. |
-| `usage-projection.test.mjs` | 31 | The per-session model-usage fold: bucket sums against the harness's own field names, refusal of unsafe or fractional counts without aborting the fold, usage recovered from an embedded stream, separate attribution per provider/model, immutable state transitions, reference stability that suppresses republishing, and both schemas rejecting junk through the only method cordis calls (`.parse`). |
+| `usage-projection.test.mjs` | 42 | The per-session model-usage fold: bucket sums against the harness's own field names, refusal of unsafe or fractional counts without aborting the fold, usage recovered from an embedded stream, separate attribution per provider/model, immutable state transitions, reference stability that suppresses republishing, and both schemas rejecting junk through the only method cordis calls (`.parse`). |
+| `explicit-selection.test.mjs` | 11 | The rule that `main` yields to a hand-picked session model, and nothing else does: respected under `hybrid`, still applied under `managed`, untouched by a respected call in the round-robin rotation, and falling back to the old rewriting behaviour when the projection service is absent, when `stateOf` throws, or when the key was never registered. A disabled manager is checked too. |
 
 The suites are plain Node scripts — no test framework, and no dependency beyond Node itself.
 
@@ -1051,9 +1080,11 @@ outside the repository.
   at 42 characters with `…`, and `"` becomes `'`.
 - **`roles.<role>.note` affects only the `routes` table.** It is human annotation; no
   routing decision, report or count reads it, and the boot log does not print it.
-- **`main` empty is a policy, not a failure.** With `main: []` a top-level turn outside
-  plan mode is never rewritten, which is the intended default; with `main` configured, it
-  is rewritten on every request and will override the composer selection.
+- **`main` empty is the simplest policy, and now not the only one.** With `main: []` a
+  top-level turn outside plan mode is never rewritten. With `main` configured under
+  `hybrid`, a session whose model was picked by hand keeps it (see "`main` and the composer's
+  model picker") and only untouched sessions are rewritten; under `managed` every top-level
+  request is rewritten, chosen by hand or not.
 - **The card can only pick what the catalog advertises.** A route the catalog stopped returning keeps its row and stays editable, labelled `(not advertised)`, but you cannot add such a route — or any model absent from the catalog — from the UI. Provider and model are never free text here, so a typo cannot be written into the config; use the patch layer for a route the host does not advertise.
 - **The card has no image-capability information.** `session/modelCatalog` exposes ids,
   names and reasoning efforts, not modalities, so nothing in the UI stops you picking a

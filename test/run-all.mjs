@@ -21,6 +21,7 @@ const SUITES = [
   ['client-structure', 'client-structure.test.mjs', 'client half load, exports, and slot registration'],
   ['client-diagnostic', 'client-diagnostic.test.mjs', 'host-side client self-diagnosis branches'],
   ['usage-projection', 'usage-projection.test.mjs', 'per-session model usage folded from the durable log'],
+  ['explicit-selection', 'explicit-selection.test.mjs', 'hybrid respects an explicit session model selection'],
 ];
 
 const run = (file) => new Promise((resolve) => {

@@ -12,10 +12,17 @@ import { PLUGIN } from './paths.mjs';
 
 const plugin = await import(PLUGIN);
 
-let captured;
+const registered = new Map();
 const services = {
   sessionProjections: {
-    register: (definition) => { captured = definition; return () => {}; },
+    register(definition) {
+      if (registered.has(definition.key)) throw new Error(`duplicate projection key: ${definition.key}`);
+      registered.set(definition.key, definition);
+      return () => {};
+    },
+    // The Host reads explicit selections back through this, exactly as
+    // dsh-llm-retry reads its own projection.
+    stateOf: (session, key) => registered.get(key)?._probeState,
   },
 };
 const ctx = {
@@ -43,12 +50,16 @@ const check = (label, ok, detail) => {
   ok ? passed++ : failed++;
 };
 
-check('the projection was registered', captured !== undefined);
+check('both projections were registered', registered.size === 2, [...registered.keys()].join(','));
+check('the usage projection is registered under its key', registered.has('modelManagerUsage'));
+check('the selection projection is registered under its key', registered.has('modelManagerSelection'));
+const captured = registered.get('modelManagerUsage');
 if (captured === undefined) {
-  console.log(`TALLY: ${passed} passed, ${failed} failed`);
+  console.log('TALLY: ' + passed + ' passed, ' + failed + ' failed');
   process.exitCode = 1;
 } else {
   run(captured);
+  runSelection(registered.get('modelManagerSelection'));
 }
 
 function run(def) {
@@ -138,9 +149,33 @@ function run(def) {
   check('view returns the state itself, so identity is stable', def.wire.view(s) === s);
 
   console.log(`\nroutes after the fold: ${s.routes.length}`);
-  console.log(`TALLY: ${passed} passed, ${failed} failed`);
-  process.exitCode = failed ? 1 : 0;
 }
+
+function runSelection(def) {
+  console.log('\n-- the explicit-selection fold --');
+  check('selection: key and stateVersion', def.key === 'modelManagerSelection'
+    && Number.isSafeInteger(def.stateVersion) && def.stateVersion >= 0);
+  check('selection: starts as not explicit', def.init({}, 0).explicit === false);
+  const s0 = def.init({}, 0);
+  check('selection: an unrelated event returns the same reference',
+    def.apply(s0, { type: 'request/header', data: { header: { config: { provider: 'p', model: 'm' } } } }) === s0);
+  check('selection: a model/selection event flips it',
+    def.apply(s0, { type: 'model/selection', data: { provider: 'p', model: 'm' } }).explicit === true);
+  const once = def.apply(s0, { type: 'model/selection', data: { provider: 'p', model: 'm' } });
+  check('selection: monotone, and a repeat returns the same reference',
+    def.apply(once, { type: 'model/selection', data: { provider: 'q', model: 'n' } }) === once);
+  check('selection: a default-written request/header does NOT count as explicit',
+    def.apply(s0, { type: 'request/header', data: { header: { config: { provider: 'p', model: 'm' } } } }).explicit === false);
+  check('selection: view is reference stable', def.wire.view(once) === once);
+  check('selection: stateSchema rejects a non-boolean', throws(() => def.stateSchema.parse({ explicit: 'yes' })));
+  check('selection: stateSchema accepts and canonicalizes',
+    JSON.stringify(def.stateSchema.parse({ explicit: true, junk: 1 })) === '{"explicit":true}');
+}
+
+process.on('exit', () => {
+  console.log(`TALLY: ${passed} passed, ${failed} failed`);
+  if (failed > 0) process.exitCode = 1;
+});
 
 function throws(fn) {
   try { fn(); return false; } catch { return true; }
