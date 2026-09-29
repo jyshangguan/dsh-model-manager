@@ -8,6 +8,8 @@
  * captured registry cannot leak between cases.
  */
 
+import { readFileSync } from 'node:fs';
+
 import { PLUGIN } from './paths.mjs';
 
 const plugin = await import(PLUGIN);
@@ -31,11 +33,11 @@ function harness(config, options = {}) {
   let explicit = options.explicit ?? false;
   const calls = [];
   const services = {
-    agents: { list: () => [options.agent].filter(Boolean), get: () => options.agent, isOwnedBy: () => false },
+    agents: { list: () => [...live.values()], get: (id) => live.get(id), isOwnedBy: () => false },
     subagents: { listChildren: async () => [] },
     subagentModelSelection: { current: () => ({ enabled: false, allowedModels: [] }) },
     planMode: { get: () => ({ active: false }) },
-    tools: { register: () => {} },
+    tools: { register: (tool) => { registeredTool = tool; } },
     systemPrompt: { section: () => () => {} },
   };
   if (options.projections !== false) {
@@ -52,6 +54,8 @@ function harness(config, options = {}) {
     };
   }
   const registered = [];
+  const live = new Map();
+  let registeredTool;
   const ctx = {
     logger: () => ({ info: () => {}, warn: () => {}, error: () => {} }),
     get: (name) => services[name],
@@ -64,9 +68,19 @@ function harness(config, options = {}) {
     },
   };
   plugin.apply(ctx, config);
-  const request = (agent, resolved) =>
-    handlers.get('agent/request')({ agent, turn: 1, step: 1 }, async () => resolved);
-  return { request, handlers, registered, calls, setExplicit: (value) => { explicit = value; } };
+  const request = (agent, resolved) => {
+    live.set(agent.id, agent);
+    return handlers.get('agent/request')({ agent, turn: 1, step: 1 }, async () => resolved);
+  };
+  return {
+    request,
+    handlers,
+    registered,
+    calls,
+    tool: () => registeredTool,
+    forget: (id) => live.delete(id),
+    setExplicit: (value) => { explicit = value; },
+  };
 }
 
 const COMPOSER = { provider: 'user-picked', model: 'session-choice' };
@@ -147,6 +161,79 @@ console.log('\n4. a disabled manager observes without touching the route');
   const h = harness({ ...CONFIG('hybrid'), enabled: false }, { explicit: true });
   const out = await h.request(topLevel(), COMPOSER);
   check('disabled manager leaves the route alone', out.model === 'session-choice', JSON.stringify(out));
+}
+
+console.log('\n5. the report shows what served the top-level agent');
+{
+  const h = harness(CONFIG('hybrid'), { explicit: true });
+  await h.request(topLevel(), COMPOSER);
+  const out = await h.tool().execute({ action: 'report' });
+  check('the report has a top-level section', out.includes('Top-level agents'), out.slice(0, 70));
+  check('it records the hand-picked origin', out.includes('picked by hand, so main yields'), out.slice(0, 200));
+  check('it records the reason that proved the override',
+    out.includes('explicit session selection (respected)'), out.slice(0, 200));
+  check('no orphan subagent table when no subagent exists',
+    !out.includes('Subagent model report') && !out.includes('child       role'), out.slice(0, 220));
+  const headers = out.split('\n').filter((l) => l.includes('status') && (l.includes('reason') || l.includes('label')));
+  check('both tables put status at the same column',
+    headers.length < 2 || headers[0].indexOf('status') === headers[1].indexOf('status'),
+    headers.map((l) => l.indexOf('status')).join(','));
+  // The 43-wide column is only trustworthy if no reason string can exceed it.
+  // Read the literals out of the host half instead of trusting a hand-kept list,
+  // which is exactly the kind of table that goes stale.
+  const hostSource = readFileSync(PLUGIN, 'utf8');
+  const reasons = [...hostSource.matchAll(/reason:?'?\s*'([^']+)'/g)].map((m) => m[1])
+    .concat([...hostSource.matchAll(/reason = '([^']+)'/g)].map((m) => m[1]));
+  const tooLong = reasons.filter((r) => r.length > 42);
+  check('no reason string can overflow the 43-wide column it is padded into',
+    reasons.length > 5 && tooLong.length === 0,
+    `${reasons.length} reasons found; overlong: ${tooLong.join(' | ')}`);
+  // And the width the code actually uses, read back out of the source, so the
+  // check above cannot pass while the renderer quietly narrows the column again.
+  const width = Number((hostSource.match(/seen\?\.reason \?\? '-'\)\.padEnd\((\d+)\)/) ?? [])[1] ?? 0);
+  const longest = reasons.reduce((n, r) => (r.length > n ? r.length : n), 0);
+  check('the renderer pads the reason column past the longest reason it can print',
+    width > 0 && longest < width, `padEnd(${width}) but the longest reason is ${longest} chars`);
+  const outLines = out.split('\n');
+  const separators = outLines.filter((l) => l.startsWith('----------  ---------'));
+  check('every table separator is exactly as wide as its header',
+    separators.every((sep) => outLines.some((l) => l.includes('role       model') && l.length === sep.length)),
+    `separators ${separators.length}, widths ${[...new Set(separators.map((x) => x.length))].join(',')}`);
+}
+{
+  const h = harness(CONFIG('hybrid'), { explicit: false });
+  await h.request(topLevel(), COMPOSER);
+  const out = await h.tool().execute({ action: 'report' });
+  check('an untouched session is reported as default-driven',
+    out.includes('the deployment default, so main applies'), out.slice(0, 220));
+  check('and its route really was rewritten by main', out.includes('mgr/main-0'), out.slice(0, 220));
+}
+{
+  const h = harness(CONFIG('managed'), { explicit: true });
+  await h.request(topLevel(), COMPOSER);
+  const out = await h.tool().execute({ action: 'report' });
+  check('managed reports the pick but shows the override',
+    out.includes('picked by hand, so main yields') && out.includes('mgr/main-0'), out.slice(0, 240));
+}
+
+console.log('\n6. a decision outlives its agent');
+{
+  const h = harness(CONFIG('hybrid'), { explicit: true });
+  await h.request(topLevel(), COMPOSER);
+  h.forget('top-1'); // the agent is disposed, but the request was still recorded
+  const out = await h.tool().execute({ action: 'report' });
+  check('a no-longer-live session still reports what served it',
+    out.includes('Top-level agents') && out.includes('unknown, agent no longer live'),
+    out.slice(0, 240));
+  check('and the row is marked inactive rather than dropped',
+    out.includes('inactive') && out.includes('picked by hand, so main yields') === false,
+    out.slice(0, 240));
+}
+{
+  const h = harness(CONFIG('hybrid'), { explicit: true });
+  const out = await h.tool().execute({ action: 'report' });
+  check('a report with nothing observed is still the empty state',
+    out.startsWith('No subagents observed yet'), out.slice(0, 60));
 }
 
 console.log(`\nregistered projection keys: ${JSON.stringify([...new Set(harness(CONFIG('hybrid'), {}).registered)])}`);
