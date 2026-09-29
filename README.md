@@ -76,6 +76,24 @@ Without that peer this plugin would install silently onto a harness too old to h
 explanation. Profiles ship `autoInstallPeers: false`, so declaring the peer does not pull a
 second copy of dsh into the profile.
 
+### Renaming or moving a linked install
+
+Both of these were hit for real while scoping this package, on DSH 0.1.7-rc.2:
+
+`remove_bundle` drops the dependency from the profile's `package.json` and removes it from
+`dsh.profile.bundles`, but **leaves the symlink behind** in the profile's `node_modules`. Delete
+that orphan yourself: a directory whose name no longer matches the `name` in its own manifest is
+precisely what a resolution scanner should not have to reason about. (Clearing it did *not* fix
+the symptom below, so it is hygiene rather than a remedy.)
+
+And a **running host cannot import a package name that did not exist when it booted**. The runtime
+resolution is computed from the installation and the bundles selected at startup, then handed to
+Node's ESM and CommonJS resolvers, so after a rename the entry reports `failed to import` —
+`inactiveEntries` finding `entry.fiber === undefined` — however many times you toggle the bundle.
+The package itself is fine: `node -e "import('<new name>')"` from the profile directory succeeds,
+and `dsh --profile <name> --dump-config` composes the row correctly, override config included.
+Only a restart picks it up. Remove the old name, install the new one, then restart once.
+
 | File | Purpose |
 | --- | --- |
 | `lib/index.js` | Host half: Cordis identity `model-manager`, exported `Config`, `apply`, the `agent/request` routing, the `agent/request-error` failover, and the `model_manager` tool. |
