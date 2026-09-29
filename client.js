@@ -40,6 +40,12 @@ window.__ModuleLoader__.load({
      * i.e. its own row id, which is the convention followed here.
      */
     const ROW_NS = 'model-manager';
+    /**
+     * Key of the session projection the host half folds from the durable log.
+     * Must match USAGE_PROJECTION_KEY in lib/index.js: the client only subscribes,
+     * it never folds.
+     */
+    const USAGE_PROJECTION_KEY = 'modelManagerUsage';
     const ROLES = ['main', 'planning', 'execution', 'vision'];
     const MODES = ['hybrid', 'managed', 'advisory'];
     /**
@@ -88,6 +94,15 @@ window.__ModuleLoader__.load({
       pickFirst: 'first — use the top model, fall back down the list',
       pickRoundRobin: 'round-robin — rotate across the list',
       orderHint: 'Order is the fallback order: the top model is tried first.',
+      usageTitle: 'Model usage',
+      usageModel: 'Provider / model',
+      usageUncachedInput: 'Uncached input',
+      usageOutput: 'Output',
+      usageCacheRead: 'Cached input',
+      usageCacheWrite: 'Cache write',
+      usageRequests: '{count} requests',
+      usageEmpty: 'No usage reported for this session yet.',
+      usageHint: 'Folded from the durable session log, so it survives a restart. Only attempts that reported an exact usage sample are counted, which is why a Turn where a model failed shows no line here.',
     };
 
     const zh = {
@@ -129,6 +144,15 @@ window.__ModuleLoader__.load({
       pickFirst: 'first — 优先用第一个，失败时按顺序向下回退',
       pickRoundRobin: 'round-robin — 在列表内轮流使用',
       orderHint: '列表顺序即回退顺序：排在最前的模型优先使用。',
+      usageTitle: '模型用量',
+      usageModel: '提供方 / 模型',
+      usageUncachedInput: '未缓存输入',
+      usageOutput: '输出',
+      usageCacheRead: '缓存读取',
+      usageCacheWrite: '缓存写入',
+      usageRequests: '{count} 次请求',
+      usageEmpty: '这个会话还没有上报用量。',
+      usageHint: '从持久会话日志折叠而来，重启后依然准确。只计入上报了精确 usage 样本的请求，因此某个 turn 发生模型失败切换时不会出现在这里。',
     };
 
     /** Styles reference only theme tokens, so light/dark switch with the host. */
@@ -160,6 +184,72 @@ window.__ModuleLoader__.load({
         fontSize: '0.85rem',
       },
       entryRow: { display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' },
+      usage: { position: 'relative', display: 'inline-flex' },
+      usageButton: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '0.35rem',
+        padding: '0.22rem 0.5rem',
+        borderRadius: 6,
+        border: '1px solid var(--dsw-alias-border-l1)',
+        background: 'var(--dsw-alias-bg-layer-2)',
+        color: 'var(--dsw-alias-label-secondary)',
+        fontSize: '0.74rem',
+        cursor: 'pointer',
+        fontVariantNumeric: 'tabular-nums',
+      },
+      usagePanel: {
+        position: 'absolute',
+        top: 'calc(100% + 0.3rem)',
+        right: 0,
+        zIndex: 30,
+        minWidth: '17rem',
+        padding: '0.6rem 0.7rem',
+        borderRadius: 8,
+        border: '1px solid var(--dsw-alias-border-l1)',
+        background: 'var(--dsw-alias-bg-layer-2)',
+        boxShadow: '0 6px 20px rgb(0 0 0 / 18%)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.35rem',
+      },
+      usageHead: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        gap: '0.8rem',
+        fontSize: '0.78rem',
+        fontWeight: 600,
+        color: 'var(--dsw-alias-label-primary)',
+      },
+      usageTable: { display: 'flex', flexDirection: 'column', gap: '0.3rem' },
+      usageRow: {
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0, 1fr) auto',
+        gap: '0.7rem',
+        alignItems: 'baseline',
+        paddingTop: '0.3rem',
+        borderTop: '1px solid var(--dsw-alias-border-l1)',
+      },
+      usageName: {
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        fontSize: '0.76rem',
+        color: 'var(--dsw-alias-label-primary)',
+      },
+      usageValue: {
+        fontSize: '0.76rem',
+        color: 'var(--dsw-alias-label-secondary)',
+        fontVariantNumeric: 'tabular-nums',
+        whiteSpace: 'nowrap',
+      },
+      usageBuckets: {
+        gridColumn: '1 / -1',
+        fontSize: '0.7rem',
+        color: 'var(--dsw-alias-label-secondary)',
+        fontVariantNumeric: 'tabular-nums',
+      },
+      usageEmpty: { fontSize: '0.76rem', color: 'var(--dsw-alias-label-secondary)' },
       index: {
         flex: '0 0 auto',
         minWidth: '1.4rem',
@@ -675,6 +765,84 @@ window.__ModuleLoader__.load({
       // gate would hide the page entirely and a packaging problem would look
       // exactly like a missing feature. The entry is therefore always reachable,
       // and the card itself reports why it cannot show values.
+      // -- per-session model usage, rendered in the session header -------------
+      // The host half folds `modelManagerUsage` out of the durable session log and
+      // ships it as a wired projection, so this half only subscribes to a finished
+      // value: no folding here, no polling, and the numbers survive a restart.
+      function UsageView(props) {
+        const face = props.face ?? null;
+        const subscribe = React.useMemo(
+          () => (face === null ? () => () => {} : (listener) => face.subscribe(listener)),
+          [face],
+        );
+        const getSnapshot = React.useMemo(
+          () => (face === null ? () => undefined : () => face.getSnapshot()),
+          [face],
+        );
+        const value = React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+        const [open, setOpen] = React.useState(false);
+        const routes = Array.isArray(value?.routes) ? value.routes : [];
+        if (routes.length === 0) return null;
+        const total = routes.reduce((sum, route) => sum + (Number.isSafeInteger(route.totalTokens) ? route.totalTokens : 0), 0);
+        const rows = [...routes].sort((a, b) => (b.totalTokens ?? 0) - (a.totalTokens ?? 0));
+        const head = [
+          h('div', { key: 'h', style: S.usageHead }, [
+            h('span', null, t('usageTitle')),
+            h('span', null, formatTokens(total)),
+          ]),
+        ];
+        for (const route of rows) {
+          const label = `${route.provider}/${route.model}`;
+          head.push(h('div', { key: label, style: S.usageRow }, [
+            h('span', { style: S.usageName, title: label }, label),
+            h('span', { style: S.usageValue }, formatTokens(route.totalTokens)),
+            h('span', { style: S.usageBuckets }, [
+              t('usageUncachedInput'), ' ', formatTokens(route.uncachedInputTokens),
+              ' · ', t('usageOutput'), ' ', formatTokens(route.outputTokens),
+              ...(route.cacheReadTokens > 0 ? [' · ', t('usageCacheRead'), ' ', formatTokens(route.cacheReadTokens)] : []),
+              ...(route.cacheWriteTokens > 0 ? [' · ', t('usageCacheWrite'), ' ', formatTokens(route.cacheWriteTokens)] : []),
+              ' · ', t('usageRequests', { count: route.requests }),
+            ].join('')),
+          ]));
+        }
+        head.push(h('div', { key: 'hint', style: S.usageEmpty }, t('usageHint')));
+        return h('span', { style: S.usage }, [
+          h('button', {
+            type: 'button',
+            style: S.usageButton,
+            'aria-haspopup': 'dialog',
+            'aria-expanded': open,
+            onClick: () => setOpen((current) => !current),
+          }, [            t('usageTitle'), ' ', formatTokens(total), ' · ', String(rows.length)],
+          ),
+          ...(open ? [h('div', { style: S.usagePanel, role: 'dialog', 'aria-label': t('usageTitle') }, head)] : []),
+        ]);
+      }
+
+      safely('session usage surface', () => ctx.inject(['sessions'], (scoped) => {
+        const sessions = scoped.sessions;
+        if (sessions === undefined || typeof sessions.binding !== 'function') {
+          console.warn('[model-manager] no sessions service; per-session model usage is unavailable');
+          return undefined;
+        }
+        return ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
+          name: 'conversation.session.header.utilities',
+          id: 'model-manager-usage',
+          order: 60,
+          locale: LOCALE_NS,
+          inject: (sessionId) => {
+            let face;
+            try {
+              face = sessions.binding(sessionId)?.session?.projections?.faceOf?.(USAGE_PROJECTION_KEY);
+            } catch (error) {
+              console.warn(`[model-manager] projection face unavailable: ${error?.message ?? error}`);
+              face = undefined;
+            }
+            return { sessionId, face: face ?? null };
+          },
+        }, UsageView));
+      }));
+
       safely('settings page', () => use(() => ctx.slots.inject('settings.section', () => {
         const disposer = ctx.slots.register({
           name: 'settings.section',
@@ -712,6 +880,13 @@ window.__ModuleLoader__.load({
       } catch {
         /* logging is best-effort */
       }
+    }
+
+    function formatTokens(value) {
+      const n = Number.isSafeInteger(value) && value >= 0 ? value : 0;
+      if (n >= 1000000) return `${(n / 1000000).toFixed(n >= 10000000 ? 0 : 1)}M`;
+      if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k`;
+      return String(n);
     }
 
     function roleKeyFor(role) {

@@ -20,6 +20,7 @@ const SUITES = [
   ['failover', 'failover.test.mjs', 'agent/request-error model failover and its guards'],
   ['client-structure', 'client-structure.test.mjs', 'client half load, exports, and slot registration'],
   ['client-diagnostic', 'client-diagnostic.test.mjs', 'host-side client self-diagnosis branches'],
+  ['usage-projection', 'usage-projection.test.mjs', 'per-session model usage folded from the durable log'],
 ];
 
 const run = (file) => new Promise((resolve) => {

@@ -565,9 +565,20 @@ another, the usage row will be absent** — the accounting genuinely cannot prov
 for that Turn. This is the harness's own rule and it applies equally to the harness's built-in
 retries; failover simply produces such Turns more often.
 
-There is no per-model **aggregate for one whole session** anywhere in the UI: the session-level
-projections (`tokenUsage`, `contextPressure`, `contextBreakdown`) accumulate four token buckets
-without splitting them by route. That gap is why this plugin keeps its own counters.
+There is no per-model **aggregate for one whole session** in the harness itself: its session-level
+projections (`tokenUsage`, `contextPressure`, `contextBreakdown`) accumulate four token buckets with
+no route split. This plugin supplies exactly that, as a **Model usage** button in the session header.
+
+It is a session projection folded from the durable log (`modelManagerUsage`), not a live counter, so
+the numbers survive a restart and are identical after fork, resume, and replay. Each row shows
+provider/model, uncached input, output, cached input and cache write when reported, request count,
+and a total. Only attempts carrying an exact usage sample **and** a provider/model on the committed
+message are counted — the same refusal the per-Turn dialog makes, so the two never disagree about
+which numbers are provable.
+
+Because the host half declares the projection and wires a view, the client half only subscribes to a
+finished value: no folding in the browser, no polling, no fetch route. That is the sanctioned path —
+*"a domain ships projection support with zero client code."*
 
 ### The tool
 
@@ -955,7 +966,7 @@ degrades to a notice or a log line.
 npm test
 ```
 
-Runs five suites in child processes and aggregates the result — **565 assertions** at the time
+Runs six suites in child processes and aggregates the result — **604 assertions** at the time
 of writing. Each suite also runs on its own: `node test/<name>.test.mjs`.
 
 | Suite | Assertions | What it pins |
@@ -963,8 +974,9 @@ of writing. Each suite also runs on its own: `node test/<name>.test.mjs`.
 | `routing.test.mjs` | 9 | The four roles route as documented; label classification; an explicit child route is respected; the tool and system-prompt section register; `apply` survives malformed configs. |
 | `edge.test.mjs` | 503 | Hostile configs, keyword anchoring and trimming, explicit-`[]`-disables versus absent-uses-defaults, round-robin committing only on apply, LRU eviction, the manager-owned rule, volatile settings reload, every `reason` string, the report/usage/routes output, and the generated allow-list YAML round-tripped through the **real** harness validator. |
 | `failover.test.mjs` | 24 | The failover chain and every guard: it walks to the end of the list and then stops rather than wrapping; `ABORTED`, `INVALID_REQUEST` and `IMAGE_OFFLOAD_REQUIRED` never fail over; a downstream recovery decision is passed through untouched; the per-step cap holds and resets on a new step; `round-robin` does wrap; single-model and disabled roles do nothing; a route outside the role's list is left alone; hostile payloads never throw; subagent chains fail over too. |
-| `client-structure.test.mjs` | 12 | The client half loads through `window.__ModuleLoader__`, requires **only** `react`, exports `{ inject, apply }`, registers its locale dictionaries and exactly one slot — and, because the check mirrors the real `SlotCore.register` validation, it fails if a registration ever loses its `name`. |
+| `client-structure.test.mjs` | 20 | The client half loads through `window.__ModuleLoader__`, requires **only** `react`, exports `{ inject, apply }`, registers its locale dictionaries and exactly two surfaces, and — because the check mirrors the real `SlotCore.register` validation — fails if a registration ever loses its `name`. It also declares each `remote.<namespace>` used must appear in `inject`, drives the settings-form bindings, and renders the usage surface against a stubbed projection face in both its collapsed and expanded states, with an empty-projection case proving those render assertions are not vacuous. |
 | `client-diagnostic.test.mjs` | 17 | Every branch of `model_manager` with `action: "client"`, including the two that matter most: a bundle the Host will not serve, and a bundle that serves but registers the wrong id. |
+| `usage-projection.test.mjs` | 31 | The per-session model-usage fold: bucket sums against the harness's own field names, refusal of unsafe or fractional counts without aborting the fold, usage recovered from an embedded stream, separate attribution per provider/model, immutable state transitions, reference stability that suppresses republishing, and both schemas rejecting junk through the only method cordis calls (`.parse`). |
 
 The suites are plain Node scripts — no test framework, and no dependency beyond Node itself.
 
