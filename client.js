@@ -68,7 +68,6 @@ window.__ModuleLoader__.load({
       roleExecutionHint: 'The default tier for delegated implementation work.',
       roleVision: 'Image recognition',
       roleVisionHint: 'Used for image, screenshot and OCR work. Pick a model that accepts images.',
-      unset: '(unset — inherit)',
       mode: 'Distribution mode',
       modeHybrid: 'hybrid — take over only when the child inherited the parent route',
       modeManaged: 'managed — always apply the role route',
@@ -118,7 +117,6 @@ window.__ModuleLoader__.load({
       roleExecutionHint: '委派实现的默认档位。',
       roleVision: '图像识别',
       roleVisionHint: '用于图像、截图与 OCR 工作。请选择支持图像输入的模型。',
-      unset: '（未设置 — 继承）',
       mode: '分发模式',
       modeHybrid: 'hybrid — 仅当子 Agent 继承父路由时才接管',
       modeManaged: 'managed — 始终应用角色路由',
@@ -173,8 +171,42 @@ window.__ModuleLoader__.load({
         color: 'var(--dsw-alias-label-primary)',
         fontSize: '0.85rem',
       },
-      selectEffort: {
-        flex: '0 1 11rem',
+      // One grid per role: fixed column tracks make every model control start and
+      // end at the same x, whatever row it is in or which optional controls show.
+      entryGrid: {
+        display: 'grid',
+        gridTemplateColumns: 'auto minmax(0, 1fr) auto auto',
+        gap: '0.35rem 0.45rem',
+        alignItems: 'center',
+      },
+      cellIndex: {
+        justifySelf: 'end',
+        minWidth: '1.1rem',
+        fontSize: '0.75rem',
+        color: 'var(--dsw-alias-label-secondary)',
+        fontVariantNumeric: 'tabular-nums',
+      },
+      cellGap: {},
+      actions: { display: 'inline-flex', gap: '0.25rem' },
+      // Fixed square glyph buttons: no text, so the column width cannot drift
+      // with the active locale or with a row having one action instead of two.
+      action: {
+        width: '1.7rem',
+        height: '1.7rem',
+        padding: 0,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 6,
+        border: '1px solid var(--dsw-alias-border-l1)',
+        background: 'var(--dsw-alias-bg-layer-1)',
+        color: 'var(--dsw-alias-label-secondary)',
+        fontSize: '0.85rem',
+        lineHeight: 1,
+        cursor: 'pointer',
+      },
+      actionOff: { opacity: 0.35, cursor: 'default' },
+      selectGrid: {
         minWidth: 0,
         padding: '0.35rem 0.5rem',
         borderRadius: 6,
@@ -182,8 +214,17 @@ window.__ModuleLoader__.load({
         background: 'var(--dsw-alias-bg-layer-1)',
         color: 'var(--dsw-alias-label-primary)',
         fontSize: '0.85rem',
+        height: '1.7rem',
       },
-      entryRow: { display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' },
+      selectEffortGrid: { minWidth: '7rem' },
+      // The add affordance must not look like another configured model.
+      selectAdd: {
+        borderStyle: 'dashed',
+        background: 'transparent',
+        color: 'var(--dsw-alias-label-secondary)',
+      },
+      cellSpan: { gridColumn: '2 / -1' },
+      pickLabel: { fontSize: '0.76rem', color: 'var(--dsw-alias-label-secondary)' },
       usage: { position: 'relative', display: 'inline-flex' },
       usageButton: {
         display: 'inline-flex',
@@ -250,23 +291,6 @@ window.__ModuleLoader__.load({
         fontVariantNumeric: 'tabular-nums',
       },
       usageEmpty: { fontSize: '0.76rem', color: 'var(--dsw-alias-label-secondary)' },
-      index: {
-        flex: '0 0 auto',
-        minWidth: '1.4rem',
-        fontSize: '0.76rem',
-        color: 'var(--dsw-alias-label-secondary)',
-        fontVariantNumeric: 'tabular-nums',
-      },
-      button: {
-        flex: '0 0 auto',
-        padding: '0.3rem 0.6rem',
-        borderRadius: 6,
-        border: '1px solid var(--dsw-alias-border-l1)',
-        background: 'var(--dsw-alias-bg-layer-2)',
-        color: 'var(--dsw-alias-label-primary)',
-        fontSize: '0.78rem',
-        cursor: 'pointer',
-      },
       toggleRow: { display: 'flex', gap: '0.5rem', alignItems: 'center' },
       checkbox: { width: '1rem', height: '1rem', accentColor: 'var(--dsw-alias-brand-primary)' },
       notice: { fontSize: '0.76rem', color: 'var(--dsw-alias-label-secondary)' },
@@ -577,7 +601,11 @@ window.__ModuleLoader__.load({
           const models = roleModels(role);
           const used = new Set(models.map((route) => routeKey(route.provider, route.model)));
 
-          const entries = models.map((route, index) => {
+          // Every control of one role's editor is a child of a single grid, so the
+          // column tracks — index, model, effort, actions — line up across rows by
+          // construction instead of by luck.
+          const cells = [];
+          models.forEach((route, index) => {
             const key = routeKey(route.provider, route.model);
             const known = catalogue().some((group) => group.id === route.provider
               && (group.models ?? []).some((entry) => entry?.id === route.model));
@@ -587,33 +615,35 @@ window.__ModuleLoader__.load({
             if (!known) options.push(h('option', { key: 'current', value: key },
               `${route.provider}/${route.model} (${t('notInCatalog')})`));
 
-            const controls = [
-              h('span', { key: 'i', style: S.index }, String(index + 1)),
-              h('select', {
-                key: 'model',
-                style: S.select,
-                value: key,
-                disabled: !ready,
-                'aria-label': `${t(roleKeyFor(role))} ${index + 1}`,
-                onChange: (event) => {
-                  const next = parseKey(event.target.value);
-                  if (next === undefined) return undefined;
-                  const copy = models.slice();
-                  copy[index] = {
-                    provider: next.provider,
-                    model: next.model,
-                    ...(typeof route.reasoningEffort === 'string' ? { reasoningEffort: route.reasoningEffort } : {}),
-                  };
-                  return saveModels(role, copy);
-                },
-              }, ...options),
-            ];
+            cells.push(h('span', { key: `${key}#i`, style: S.cellIndex }, String(index + 1)));
+
+            cells.push(h('select', {
+              key: `${key}#m`,
+              style: S.selectGrid,
+              value: key,
+              disabled: !ready,
+              'aria-label': `${t(roleKeyFor(role))} ${index + 1}`,
+              onChange: (event) => {
+                const next = parseKey(event.target.value);
+                if (next === undefined) return undefined;
+                const copy = models.slice();
+                copy[index] = {
+                  provider: next.provider,
+                  model: next.model,
+                  ...(typeof route.reasoningEffort === 'string' ? { reasoningEffort: route.reasoningEffort } : {}),
+                };
+                return saveModels(role, copy);
+              },
+            }, ...options));
 
             const efforts = effortsFor(route);
-            if (efforts.length > 0) {
-              controls.push(h('select', {
-                key: 'effort',
-                style: S.selectEffort,
+            // A row with no effort control still occupies the column, otherwise the
+            // action buttons of every row beneath it would sit at a different x.
+            cells.push(efforts.length === 0
+              ? h('span', { key: `${key}#gap`, 'aria-hidden': true })
+              : h('select', {
+                key: `${key}#e`,
+                style: { ...S.selectGrid, ...S.selectEffortGrid },
                 value: typeof route.reasoningEffort === 'string' ? route.reasoningEffort : '',
                 disabled: !ready,
                 'aria-label': `${t(roleKeyFor(role))} ${index + 1} — ${t('effort')}`,
@@ -628,76 +658,76 @@ window.__ModuleLoader__.load({
               h('option', { key: '', value: '' }, t('effortDefault')),
               ...efforts.map((effort) => h('option', { key: effort.id, value: effort.id },
                 effort.name && effort.name !== effort.id ? `${effort.name} — ${effort.id}` : effort.id))));
-            }
 
-            if (index > 0) {
-              controls.push(h('button', {
-                key: 'up',
+            // Both actions always render; the first row's "move up" is disabled
+            // rather than absent, so the column width never shifts while reordering
+            // and the glyphs keep the row the same width in every locale.
+            cells.push(h('span', { key: `${key}#a`, style: S.actions },
+              h('button', {
                 type: 'button',
-                style: S.button,
-                disabled: !ready,
+                style: index === 0 ? { ...S.action, ...S.actionOff } : S.action,
+                disabled: !ready || index === 0,
                 'aria-label': `${t('moveUp')} ${index + 1}`,
+                title: t('moveUp'),
                 onClick: () => {
                   const copy = models.slice();
                   const [moved] = copy.splice(index, 1);
                   copy.splice(index - 1, 0, moved);
                   return saveModels(role, copy);
                 },
-              }, t('moveUp')));
-            }
-            controls.push(h('button', {
-              key: 'rm',
-              type: 'button',
-              style: S.button,
-              disabled: !ready,
-              'aria-label': `${t('remove')} ${index + 1}`,
-              onClick: () => saveModels(role, models.filter((_, i) => i !== index)),
-            }, t('remove')));
-
-            return h('div', { key: `${role}-${index}`, style: S.entryRow }, ...controls);
+              }, '↑'),
+              h('button', {
+                type: 'button',
+                style: S.action,
+                disabled: !ready,
+                'aria-label': `${t('remove')} ${index + 1}`,
+                title: t('remove'),
+                onClick: () => saveModels(role, models.filter((_, position) => position !== index)),
+              }, '×')));
           });
 
-          const addRow = h('div', { style: S.entryRow },
-            h('select', {
-              key: 'add',
-              style: S.select,
-              value: '',
-              disabled: !ready,
-              'aria-label': `${t(roleKeyFor(role))} — ${t('addModel')}`,
-              onChange: (event) => {
-                const next = parseKey(event.target.value);
-                if (next === undefined) return undefined;
-                return saveModels(role, [...models, { provider: next.provider, model: next.model }]);
-              },
+          // Add reads as an affordance, not as another configured model: dashed
+          // border, no fill, muted text, and it spans the value columns.
+          cells.push(h('select', {
+            key: 'add',
+            style: { ...S.selectGrid, ...S.selectAdd, ...S.cellSpan },
+            value: '',
+            disabled: !ready,
+            'aria-label': `${t(roleKeyFor(role))} — ${t('addModel')}`,
+            onChange: (event) => {
+              const next = parseKey(event.target.value);
+              if (next === undefined) return undefined;
+              return saveModels(role, [...models, { provider: next.provider, model: next.model }]);
             },
-            h('option', { key: '', value: '' }, t('addModel')),
-            ...modelOptions(used)));
+          },
+          h('option', { key: '', value: '' }, t('addModel')),
+          ...modelOptions(used)));
 
-          const tail = [];
           if (models.length > 1) {
-            tail.push(h('span', { key: 'oh', style: S.hint }, t('orderHint')));
             const holder = roles[role];
             const pick = holder !== null && typeof holder === 'object' && holder.pick === 'round-robin'
               ? 'round-robin' : 'first';
-            tail.push(h('div', { key: 'pick', style: S.entryRow },
-              h('span', { style: S.index }, t('pick')),
-              h('select', {
-                style: S.selectEffort,
-                value: pick,
-                disabled: !ready,
-                'aria-label': `${t(roleKeyFor(role))} — ${t('pick')}`,
-                onChange: (event) => write([{ op: 'set', path: ['roles', role, 'pick'], value: event.target.value }]),
-              },
-              h('option', { key: 'first', value: 'first' }, t('pickFirst')),
-              h('option', { key: 'rr', value: 'round-robin' }, t('pickRoundRobin')))));
+            cells.push(h('span', {
+              key: 'pick',
+              style: { ...S.cellSpan, display: 'inline-flex', alignItems: 'center', gap: '0.45rem' },
+            },
+            h('span', { style: S.pickLabel }, t('pick')),
+            h('select', {
+              style: { ...S.selectGrid, ...S.selectEffortGrid },
+              value: pick,
+              disabled: !ready,
+              'aria-label': `${t(roleKeyFor(role))} — ${t('pick')}`,
+              onChange: (event) => write([{ op: 'set', path: ['roles', role, 'pick'], value: event.target.value }]),
+            },
+            h('option', { key: 'first', value: 'first' }, t('pickFirst')),
+            h('option', { key: 'rr', value: 'round-robin' }, t('pickRoundRobin')))));
           }
 
           return h('div', { key: role, style: S.row },
             h('label', { style: S.label }, t(roleKeyFor(role))),
             h('span', { style: S.hint }, t(hintKeyFor(role))),
-            ...entries,
-            addRow,
-            ...tail);
+            h('div', { style: S.entryGrid }, ...cells),
+            models.length > 1 ? h('span', { key: 'oh', style: S.hint }, t('orderHint')) : null);
         };
 
         const modeControl = h('div', { style: S.row },
@@ -876,7 +906,7 @@ window.__ModuleLoader__.load({
       // from "applied but a step failed" (each failed step logs its own
       // `[model-manager] <step>: <error>` warning immediately above this).
       try {
-        console.log('[model-manager] client half applied; locale registered, 1 surface awaited (settings page)');
+        console.log('[model-manager] client half applied; locale registered, 2 surfaces awaited (settings section, session header utilities)');
       } catch {
         /* logging is best-effort */
       }

@@ -203,9 +203,15 @@ second or third route from a `round-robin` list.
 
 | Control | Writes | Notes |
 | --- | --- | --- |
-| Model picker, one per role (`Main model`, `Planning and reasoning`, `Execution`, `Image recognition`) | `set roles.<role>.models` | A `<select>` whose options are grouped by provider in `<optgroup>`s, from `ctx.remote.session.modelCatalog()`. Each option is labelled `name — id`, or just `id` when the name equals it. `(unset — inherit)` writes `models: []`, which is the same as the YAML default: no route for that role, and `vision` falls back to `execution`. Only the first route of a role is editable here; the picker replaces the list with one entry. |
+| Model rows, one per role (`Main model`, `Planning and reasoning`, `Execution`, `Image recognition`) | `set roles.<role>.models` | Each configured route is its own row with a `<select>` grouped by provider in `<optgroup>`s, fed by `ctx.remote.session.modelCatalog()` and labelled `name — id`. A route the catalog stopped advertising stays selectable and is marked `(not in catalog)` rather than being silently swapped. An empty list is the YAML default: no route for that role, and `vision` falls back to `execution`. |
+| Add a model | `set roles.<role>.models` | One dashed control under the rows, listing every catalog model the role has not already used, so a model cannot be added twice. |
+| `up` / `remove` | `set roles.<role>.models` | Reorder and delete. The whole list is rewritten in one atomic operation, so a reorder cannot interleave into a partial state. The up control is **disabled on the first row** rather than absent, so the column never changes width. |
+ `reasoning.efforts`** in the catalog. `(model default)` writes a route with no `reasoningEffort`, letting the adapter choose; naming a tier explicitly is how you satisfy a model that rejects a request without one. |
 | Reasoning-effort picker | `set roles.<role>.models` (single route with `reasoningEffort`) | Appears **only when the selected model advertises `reasoning.efforts`** in the catalog. `(model default)` writes a route with no `reasoningEffort`, letting the adapter choose; naming a tier explicitly is how you satisfy a model that rejects a request without one. |
+| `Pick` (`first` / `round-robin`) | `set roles.<role>.pick` | Shown for a role holding two or more models. `first` always uses index 0 and only advances when a route fails; `round-robin` spreads consecutive requests. |
 | Distribution mode | `set strategy.mode` | `hybrid` / `managed` / `advisory`, labelled with the same one-line explanations this README uses. A stored mode the card does not know displays as `hybrid`, mirroring the host half's fallback. |
+
+**Layout.** One CSS grid per role, with fixed column tracks `auto minmax(0, 1fr) auto auto` — index, model, effort, actions. That choice is the whole reason the rows line up: in a flex row a control with `flex: 1 1 16rem` takes width from its siblings, so any row that omits one control (a model with no reasoning tiers, a first row with no reorder button) pulls every other row's right edge out of alignment. Under the grid a row with no effort control still emits an empty cell, so the action column sits at the same x everywhere. The two actions are glyphs rather than words, so the column is also the same width in either locale; each keeps an `aria-label` and a native `title`. The add affordance is deliberately unlike a model row — dashed border, no fill, muted text, spanning the value columns — and the pick line uses its own label style instead of the numeric index style.
 
 Each role also carries a hint line (`Top-level agent outside plan mode. Leave unset to keep
 following the composer selection.`, `Used for image, screenshot and OCR work. Pick a model
@@ -241,7 +247,7 @@ notice instead — and every optional collaborator is probed, with any failure l
 | --- | --- | --- |
 | No `form` on a page render | the host rendered this slot without values — a defensive path, not the row page | `This page did not supply configuration values, so the model roles cannot be edited here. Open this plugin's own row on the Plugins page to configure it.` (warning colour) |
 | No `form` on the summary render | the row-list render always omits it | renders nothing: the card returns `null` and the row's description stands |
-| Catalog loading | `modelCatalog()` in flight | role rows render with only `(unset — inherit)` — plus the configured route, if any, offered as `(not advertised)` — and `Loading models…` below |
+| Catalog loading | `modelCatalog()` in flight | every control renders **disabled**, the add control offers only its own `Add a model…` placeholder, a configured route the catalog has not returned yet still shows as `provider/model (not advertised)` so its value is never silently swapped, and `Loading models…` appears below |
 | Not available to this client | `form.state.status === 'unavailable'` — the namespace is not exposed here | `These settings are not available to this client right now.` (warning colour) |
 | Read-only deployment | `status === 'ready'` but `writable === false` | role rows render disabled, plus `This deployment stores settings read-only.` |
 | Nothing advertised | catalog ready with zero provider groups | `No models are advertised yet. Configure a provider route, then reopen this page.` |
@@ -258,9 +264,9 @@ most recent request, and a throwing subscriber cannot break the other subscriber
 
 **A configured route the catalog no longer advertises stays selectable**, appended as an
 extra option labelled `pku-corpus/some-retired-model (not advertised)` and kept as the
-selected value. Without that, a control whose value is missing from its options would render
-as `(unset — inherit)` while the config actually names a route — the display would lie about
-what is running.
+selected value. Without that, a `<select>` whose value matches no `<option>` renders as its
+first option instead — so the card would appear to name a model the config does not select,
+and saving anything else on that row would overwrite the real route.
 
 Note also that picking a *different* model for a role preserves a `reasoningEffort` already
 stored on that route. If the new model advertises no efforts, the effort picker disappears
@@ -1048,10 +1054,7 @@ outside the repository.
 - **`main` empty is a policy, not a failure.** With `main: []` a top-level turn outside
   plan mode is never rewritten, which is the intended default; with `main` configured, it
   is rewritten on every request and will override the composer selection.
-- **The card edits one route per role.** Each picker writes `models` as a single-entry list
-  (or `[]` for `(unset — inherit)`), so a multi-model `round-robin` list can only be built
-  in the patch layer. A role that already has several models shows its **first** route, and
-  the second entry onwards is discarded the moment you touch that role's picker.
+- **The card can only pick what the catalog advertises.** A route the catalog stopped returning keeps its row and stays editable, labelled `(not advertised)`, but you cannot add such a route — or any model absent from the catalog — from the UI. Provider and model are never free text here, so a typo cannot be written into the config; use the patch layer for a route the host does not advertise.
 - **The card has no image-capability information.** `session/modelCatalog` exposes ids,
   names and reasoning efforts, not modalities, so nothing in the UI stops you picking a
   text-only model for `vision`; the host half's `routes` audit is the check.

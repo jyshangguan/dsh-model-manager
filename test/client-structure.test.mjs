@@ -227,11 +227,167 @@ checks.push(
 );
 if (llmCalls.length > 0) console.log(`\n7. llm directory calls under a hanging session catalog: ${JSON.stringify(llmCalls)}`);
 
-console.log('');
+let passed = 0;
 let failed = 0;
+console.log('');
 for (const [label, ok] of checks) {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`);
-  if (!ok) failed++;
+  ok ? passed++ : failed++;
 }
-console.log(failed === 0 ? '\nRESULT: PASS' : `\nRESULT: FAIL (${failed})`);
+
+// ---- 8. settings card layout invariants ------------------------------------
+// The model editor is a grid, and that is the whole fix: flex rows whose width
+// depends on siblings cannot keep columns aligned once a row shows an extra
+// control. These assertions pin the invariants that produce the alignment, so a
+// later edit that reintroduces a wrapping flex row or drops a placeholder cell
+// fails here instead of looking wrong on screen.
+console.log('\n8. settings card layout');
+
+const layoutRegistrations = [];
+const layoutCtx = {
+  effect: (fn) => { fn(); return () => {}; },
+  inject: (deps, cb) => {
+    const scoped = Object.create(layoutCtx);
+    for (const dep of deps) scoped[dep] = dep === 'sessions' ? undefined : services[dep];
+    cb(scoped);
+  },
+  locale: { register: () => () => {}, bind: (ns) => (key, params) => (params ? `${ns}.${key}:${params.count}` : `${ns}.${key}`) },
+  slots: {
+    inject: (name, cb) => (name === 'settings.section' ? cb() : () => {}),
+    register: (options, Component) => { layoutRegistrations.push({ options, Component }); return () => {}; },
+  },
+  remote: {
+    $on: () => () => {},
+    // A catalog entry WITH reasoning efforts and one without, so both branches
+    // of the effort column exist in the rendered tree.
+    session: {
+      modelCatalog: async () => ({
+        ok: true,
+        value: {
+          groups: [{
+            id: 'pku-corpus',
+            name: 'PKU',
+            models: [
+              { id: 'qwen3.8-max-0902', name: 'Qwen Max', reasoning: { efforts: [{ id: 'high', name: 'High' }] } },
+              { id: 'qwen3.8-flash', name: 'Qwen Flash' },
+            ],
+          }],
+          failures: [],
+        },
+      }),
+    },
+  },
+};
+exported.apply(layoutCtx);
+
+const card = layoutRegistrations.find((r) => r.options?.id === 'model-manager')?.Component;
+const cardState = {
+  status: 'ready',
+  revision: 3,
+  writable: true,
+  value: {
+    enabled: true,
+    strategy: { mode: 'hybrid' },
+    roles: {
+      main: { models: [{ provider: 'pku-corpus', model: 'qwen3.8-max-0902' }, { provider: 'pku-corpus', model: 'qwen3.8-flash' }] },
+      planning: { models: [] },
+      execution: { models: [] },
+      vision: { models: [] },
+    },
+  },
+};
+
+const layoutChecks = [];
+let cardTree;
+try {
+  cardTree = card({ form: { state: cardState, mutate: async () => true } });
+} catch (error) {
+  layoutChecks.push(['card renders a populated role without throwing', false, String(error?.message ?? error)]);
+}
+if (cardTree !== undefined) layoutChecks.push(['card renders a populated role without throwing', true]);
+
+const nodes = [];
+(function walk(node) {
+  if (node === null || node === undefined || typeof node !== 'object') return;
+  if (Array.isArray(node)) { node.forEach(walk); return; }
+  if (node.type !== undefined) nodes.push(node);
+  walk(node.children);
+  if (node.props?.style === undefined) return;
+})(cardTree);
+
+const grids = nodes.filter((n) => n.props?.style?.display === 'grid');
+layoutChecks.push(['one grid container per role, so every role aligns on its own',
+  grids.length === 4, `found ${grids.length}`]);
+layoutChecks.push(['the grid declares index, model, effort and action tracks',
+  grids.every((g) => g.props?.style?.gridTemplateColumns === 'auto minmax(0, 1fr) auto auto'),
+  grids[0]?.props?.style?.gridTemplateColumns]);
+layoutChecks.push(['no grid cell reflows, which is what misaligned the old flex rows',
+  grids.every((g) => g.props?.style?.flexWrap === undefined),
+  JSON.stringify(grids.map((g) => g.props?.style?.flexWrap))]);
+
+// Two models must emit two complete 4-cell groups.
+const gridChildren = grids[0]?.children ?? [];
+const flat = [];
+// Descend into each node's own children too: the action buttons live inside the
+// action cell, so a flatten that only walks arrays stops one level above them.
+(function flatten(list) {
+  for (const item of list ?? []) {
+    if (Array.isArray(item)) { flatten(item); continue; }
+    if (item === null || typeof item !== 'object') continue;
+    flat.push(item);
+    flatten(item.children);
+  }
+})(gridChildren);
+const cellNodes = (grids[0]?.children ?? []).flat(9).filter((c) => c !== null && typeof c === 'object');
+// Four cells per row (index, model, effort-or-placeholder, actions), plus the
+// add affordance and the pick line this role shows because it has two models.
+layoutChecks.push(['every row emits all four cells, effort placeholder included',
+  cellNodes.length === 2 * 4 + 2, `cells ${cellNodes.length}`]);
+const modelSelects = flat.filter((n) => n.type === 'select' && String(n.props?.['aria-label'] ?? '').match(/Main \d$/));
+layoutChecks.push(['each model gets its own value select', modelSelects.length === 2, `found ${modelSelects.length}`]);
+const actionSpans = flat.filter((n) => n.props?.style?.display === 'inline-flex'
+  && (n.children ?? []).some((c) => c?.type === 'button'));
+layoutChecks.push(['each row carries an action cell', actionSpans.length >= 2, `found ${actionSpans.length}`]);
+const upButtons = flat.filter((n) => n.type === 'button' && String(n.props?.['aria-label'] ?? '').startsWith('dsh-model-manager.moveUp'));
+layoutChecks.push(['move-up exists on every row, disabled on the first',
+  upButtons.length === 2 && upButtons[0]?.props?.disabled === true,
+  upButtons.map((b) => b.props?.disabled).join(',')]);
+layoutChecks.push(['glyph-only buttons still name themselves',
+  upButtons.every((b) => typeof b.props?.['aria-label'] === 'string' && typeof b.props?.title === 'string')]);
+
+const addSelect = flat.find((n) => n.type === 'select' && String(n.props?.['aria-label'] ?? '').includes('addModel'));
+layoutChecks.push(['the add control is styled as an affordance, not a model row',
+  addSelect?.props?.style?.borderStyle === 'dashed' && addSelect?.props?.style?.background === 'transparent',
+  JSON.stringify(addSelect?.props?.style ?? {})]);
+layoutChecks.push(['the add control spans the value columns',
+  addSelect?.props?.style?.gridColumn === '2 / -1', addSelect?.props?.style?.gridColumn]);
+
+for (const [label, ok, detail] of layoutChecks) {
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`);
+  if (!ok && detail !== undefined) console.log(`        ${detail}`);
+  ok ? passed++ : failed++;
+}
+
+// ---- 9. theme tokens are real ----------------------------------------------
+// `Theme.listTokens` (Client inspect provider) is the authoritative set; the
+// list below was read from it against the running page. Inventing a token does
+// not throw: `var()` with an unknown custom property drops the declaration, so
+// the element silently inherits a color and the intent is lost without a trace.
+const LEGAL_TOKENS = new Set([
+  '--dsw-alias-bg-base', '--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2', '--dsw-alias-bg-overlay',
+  '--dsw-alias-border-l1', '--dsw-alias-border-l2', '--dsw-alias-brand-primary',
+  '--dsw-alias-label-primary', '--dsw-alias-label-secondary',
+  '--dsw-alias-state-error-primary', '--dsw-alias-state-idle-primary',
+  '--dsw-alias-state-success-primary', '--dsw-alias-state-warn-primary',
+  '--dsw-specific-sidebar-fill',
+]);
+const tokens = [...clientSource.matchAll(/--dsw-[a-z0-9-]+/gi)].map((m) => m[0]);
+const invented = tokens.filter((t) => !LEGAL_TOKENS.has(t) && t !== '--dsw-alias-');
+console.log('\n9. theme tokens');
+console.log(`${invented.length === 0 ? 'PASS' : 'FAIL'}  every theme token used is published by Theme.listTokens`);
+if (invented.length > 0) console.log(`        invented: ${[...new Set(invented)].join(', ')}`);
+invented.length === 0 ? passed++ : failed++;
+
+console.log('\nRESULT: ' + (failed === 0 ? 'PASS' : `FAIL (${failed})`));
+console.log(`TALLY: ${passed} passed, ${failed} failed`);
 process.exitCode = failed ? 1 : 0;
