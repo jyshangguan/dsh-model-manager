@@ -1,5 +1,5 @@
 /**
- * Unit probe for dsh-model-manager.
+ * Unit probe for @jyshangguan/dsh-model-manager.
  *
  * Mocks a Cordis context whose service surface mirrors the live DSH 0.1.7-rc.2
  * host, then drives routing and reporting. Injected services are exposed as

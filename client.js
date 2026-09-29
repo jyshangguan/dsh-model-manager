@@ -1,5 +1,5 @@
 /**
- * dsh-model-manager — Web client half.
+ * @jyshangguan/dsh-model-manager — Web client half.
  *
  * Contributes a configuration page for this plugin's own row on the Plugins
  * page. The row gains a configure control that opens a card with one model
@@ -23,15 +23,22 @@
  * volatile settings cards use. The host half re-reads its config on
  * `loader/volatile-update`, so a change takes effect without a restart.
  *
- * @module dsh-model-manager/client
+ * @module @jyshangguan/dsh-model-manager/client
  */
 window.__ModuleLoader__.load({
-  id: 'dsh-model-manager',
+  id: '@jyshangguan/dsh-model-manager',
   factory(require) {
     const React = require('react');
     const h = React.createElement;
 
-    /** Locale namespace for this card's copy. */
+    /**
+     * Locale namespace for this card's copy. Deliberately NOT the package name:
+     * the namespace is ours, so it stayed put when the package became scoped,
+     * which keeps every existing key (`dsh-model-manager.usageTitle`, …) and
+     * every translation stable across the rename. The module-loader `id` above
+     * is the one string that must track the package name, because the Host
+     * composes this half under it.
+     */
     const LOCALE_NS = 'dsh-model-manager';
     /**
      * This plugin's own settings namespace — the Loader row id its host half is

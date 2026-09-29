@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 
 const SUITES = [
+  ['packaging', 'packaging.test.mjs', 'package identity, publishability, and tarball completeness'],
   ['routing', 'routing.test.mjs', 'role routing, classification, and the model_manager tool'],
   ['edge', 'edge.test.mjs', 'adversarial config, keyword matching, reporting, settings reload'],
   ['failover', 'failover.test.mjs', 'agent/request-error model failover and its guards'],
@@ -50,7 +51,7 @@ let totalPassed = 0;
 let totalFailed = 0;
 let broken = 0;
 
-console.log('dsh-model-manager — test suite\n');
+console.log('@jyshangguan/dsh-model-manager — test suite\n');
 for (const [name, file, what] of SUITES) {
   const { code, out } = await run(file);
   const { passed, failed: suiteFailed } = tallyOf(out);

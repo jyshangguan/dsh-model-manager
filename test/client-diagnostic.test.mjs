@@ -21,7 +21,7 @@ const check = (name, ok, observed) => {
   else { failed++; console.log(`FAIL  ${name}\n        observed: ${JSON.stringify(observed)}`); }
 };
 
-const BUNDLE = `window.__ModuleLoader__.load({ id: 'dsh-model-manager', factory(require){ return {apply(){}}; } });`;
+const BUNDLE = `window.__ModuleLoader__.load({ id: '@jyshangguan/dsh-model-manager', factory(require){ return {apply(){}}; } });`;
 let tools = [];
 
 function makeCtx({ withSettings = true, bundleStatus = 200, bundleBody = BUNDLE, withModules = true } = {}) {
@@ -35,11 +35,11 @@ function makeCtx({ withSettings = true, bundleStatus = 200, bundleBody = BUNDLE,
             rev: 'ba2fce3a86ff',
             batches: [],
             entries: [
-              { id: 'dsh-model-manager', url: '/plugins/dsh-model-manager/client.js?rev=ba2fce3a86ff' },
+              { id: '@jyshangguan/dsh-model-manager', url: '/plugins/@jyshangguan/dsh-model-manager/client.js?rev=ba2fce3a86ff' },
               { id: 'dshmarket', url: '/plugins/dshmarket/client.js?rev=x' },
             ],
           }),
-          clientPath: (id) => (id === 'dsh-model-manager' ? '/abs/path/client.js' : undefined),
+          clientPath: (id) => (id === '@jyshangguan/dsh-model-manager' ? '/abs/path/client.js' : undefined),
           fetchBundle: async () => ({ status: bundleStatus, text: async () => bundleBody }),
         };
       }
@@ -68,7 +68,7 @@ const client = async (options) => {
 console.log('=== A. healthy composition ===');
 {
   const out = await client();
-  check('A1 the package is reported PRESENT', out.includes('PRESENT (dsh-model-manager)'), out);
+  check('A1 the package is reported PRESENT', out.includes('PRESENT (@jyshangguan/dsh-model-manager)'), out);
   check('A2 the self-fetch reports HTTP 200', /self-fetch\s*:\s*HTTP 200/.test(out), out);
   check('A3 the bundle is recognised as a module-loader bundle', out.includes('module loader  : present'), out);
   check('A4 the bundle registers the right id', out.includes('registers id   : yes'), out);
@@ -112,7 +112,7 @@ console.log('\n=== F. a throwing self-fetch must not break the action ===');
   ctx.get = (name) => {
     if (name === 'clientModules') {
       return {
-        graph: () => ({ rev: 'r', entries: [{ id: 'dsh-model-manager', url: '/p' }] }),
+        graph: () => ({ rev: 'r', entries: [{ id: '@jyshangguan/dsh-model-manager', url: '/p' }] }),
         clientPath: () => '/x',
         fetchBundle: () => { throw new Error('boom'); },
       };

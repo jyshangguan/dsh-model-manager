@@ -75,7 +75,7 @@ const ctx = {
   effect(fn, label) { effects.push(label); const d = fn(); return () => { if (typeof d === 'function') d(); }; },
   inject(deps, cb) { const scoped = Object.create(ctx); for (const d of deps) scoped[d] = services[d]; return cb(scoped); },
   locale: {
-    register: (ns, dicts) => { localeCalls.push({ ns, en: Object.keys(dicts.en ?? {}).length, zh: Object.keys(dicts.zh ?? {}).length }); return () => {}; },
+    register: (ns, dicts) => { localeCalls.push({ ns, en: Object.keys(dicts.en ?? {}), zh: Object.keys(dicts.zh ?? {}) }); return () => {}; },
     bind: (ns) => (key) => `${ns}.${key}`,
   },
   slots: {
@@ -97,7 +97,7 @@ const ctx = {
 };
 
 console.log('1. factory id, and modules required at load');
-console.log('   id      :', captured?.id, captured?.id === 'dsh-model-manager' ? 'PASS' : 'FAIL');
+console.log('   id      :', captured?.id, captured?.id === '@jyshangguan/dsh-model-manager' ? 'PASS' : 'FAIL');
 console.log('   requires:', JSON.stringify(required), required.every((n) => n === 'react') ? 'PASS' : 'FAIL');
 
 console.log('\n2. exports');
@@ -107,7 +107,7 @@ console.log('   apply :', typeof exported.apply === 'function' ? 'PASS' : 'FAIL'
 exported.apply(ctx);
 await new Promise((r) => setTimeout(r, 20));
 
-console.log('\n3. locale:', JSON.stringify(localeCalls));
+console.log('\n3. locale:', JSON.stringify(localeCalls.map((c) => ({ ns: c.ns, en: c.en.length, zh: c.zh.length }))));
 console.log('4. slots injected:', JSON.stringify(slotInjects));
 for (const r of registerCalls) console.log('   register:', JSON.stringify(r.options), '| Component:', typeof r.Component);
 console.log('5. configForms.get called with:', JSON.stringify(configFormGets));
@@ -154,10 +154,13 @@ try {
 }
 
 const checks = [
-  ['factory id is the package name', captured?.id === 'dsh-model-manager'],
+  ['factory id is the package name', captured?.id === '@jyshangguan/dsh-model-manager'],
   ['only react is required', required.every((n) => n === 'react')],
   ['apply exported', typeof exported.apply === 'function'],
-  ['locale registered and en/zh key sets match', localeCalls[0]?.en > 0 && localeCalls[0]?.en === localeCalls[0]?.zh],
+  ['locale registered and en/zh key sets match',
+    (localeCalls[0]?.en.length ?? 0) > 0
+      && JSON.stringify([...localeCalls[0].en].sort()) === JSON.stringify([...localeCalls[0].zh].sort())
+      && localeCalls[0].ns === 'dsh-model-manager'],
   ['Settings section slot injected', slotInjects.includes('settings.section')],
   ['both surfaces are injected', slotInjects.length === 2
     && slotInjects.includes('settings.section')

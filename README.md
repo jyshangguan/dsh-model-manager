@@ -1,4 +1,4 @@
-# dsh-model-manager
+# @jyshangguan/dsh-model-manager
 
 A host-half plugin for DeepSeek Harness that assigns models to four roles — `main`,
 `planning`, `execution`, `vision` — applies them on the `agent/request` waterfall, and
@@ -22,12 +22,59 @@ configuration card to the Plugins page. There is no build step for either half.
 
 ## Install
 
-Clone it, then install the directory into a profile:
+One command — from the registry, straight from GitHub, or from a working copy:
 
 ```bash
+# from npm
+dsh plugin --profile web add @jyshangguan/dsh-model-manager@latest
+
+# from GitHub, no publishing step; needs git access to the repo
+dsh plugin --profile web add github:jyshangguan/dsh-model-manager
+
+# from a working copy
 git clone https://github.com/jyshangguan/dsh-model-manager.git
-cd dsh-model-manager
+dsh plugin --profile web add /absolute/path/to/dsh-model-manager
 ```
+
+`dsh plugin` forwards everything after `--profile <name>` to **pnpm, run inside the profile
+directory** under a file lock (`lib/bin.js` → `runPlugin` → `runPluginCommand` in
+`@deepseek-ai/dsh-plugin-manager`). It is the same code path the GUI's `install_bundle` action
+uses, so both leave an identical result.
+
+What makes it one command instead of three: after the install, `reconcile()` walks every *new*
+profile dependency, reads its manifest, and when it declares `dsh.bundle.patch` it validates that
+patch and appends the package name to `dsh.profile.bundles`, writing `package.json` atomically. A
+dependency that declares no `dsh.bundle` prints `installed as a plain dependency, not a profile
+layer` and is never mounted. The profile-layer registration you would otherwise hand-edit is the
+installer's job.
+
+Then **restart the harness once** (below) and confirm the row mounted: `plugin_manager`
+`list_plugins` should show row id `model-manager`, `enabled: true`, `fiberPhase: active`.
+
+### Why the package is scoped
+
+The unscoped name `dsh-model-manager` is **already taken on npm by a different plugin**: another
+DeepSeek Harness package whose Chinese display name is also 模型管理器, and which also declares
+`dsh.bundle.patch`. Installing by that bare name fetches theirs and auto-registers it into your
+boot graph; were both ever mounted together their loader rows could collide on one id, which
+aborts startup with `duplicate loader entry id`. `test/packaging.test.mjs` pins the scoped name
+so this cannot silently regress.
+
+### The runtime version gate
+
+`peerDependencies["@deepseek-ai/dsh"]` is `>=0.1.7-rc.2 <0.2.0`. The harness checks exactly that
+peer — only names equal to `@deepseek-ai/dsh` or beginning `@deepseek-ai/dsh-` — with semver,
+prereleases included, and refuses an incompatible install while printing the exemption command:
+
+```bash
+dsh plugin --profile web allow-version @jyshangguan/dsh-model-manager@0.1.0 \
+  --dsh-version <exact runtime version> --accept-risk
+```
+
+Without that peer this plugin would install silently onto a harness too old to have
+`sessionProjections.stateOf` or the `model/selection` event, and then degrade with no
+explanation. Profiles ship `autoInstallPeers: false`, so declaring the peer does not pull a
+second copy of dsh into the profile.
 
 | File | Purpose |
 | --- | --- |
@@ -35,7 +82,7 @@ cd dsh-model-manager
 | `client.js` | Client half: the configuration card, contributed as a page in the Settings panel. |
 | `locale/en.json`, `locale/zh.json` | Display metadata only — the bundle's `title` and `description` in the plugin list. |
 | `cordis.patch.yml` | Bundle layer: inserts exactly one row, id `model-manager`. |
-| `package.json` | Package `dsh-model-manager`, declaring `dsh.bundle.patch` and `dsh.client`. |
+| `package.json` | Package `@jyshangguan/dsh-model-manager`, declaring `dsh.bundle.patch`, `dsh.client`, and the `@deepseek-ai/dsh` version gate. |
 | `test/` | The test suite; `npm test` runs all of it. See [Testing](#testing). |
 
 ### Making the schema dependency resolvable
@@ -62,22 +109,11 @@ Skipping it does not break the plugin: `Config` degrades to `undefined`, cordis'
 lose is the Settings card — the harness only serves a settings namespace for a row that has a
 Config schema, so the card would report the namespace as unavailable.
 
-### Installing into a profile
-
-Either with the harness plugin manager (`plugin_manager` with `action: "install_bundle"` and
-`target` set to this directory's absolute path) or on the CLI:
-
-```bash
-dsh plugin --profile web add /absolute/path/to/dsh-model-manager
-```
-
-Both paths run a package install inside the profile directory. The plugin manager then
-reconciles newly installed dependencies that declare `dsh.bundle` into the profile's
-`dsh.profile.bundles`, so `dsh-model-manager` becomes a profile layer automatically; a
-dependency that declares no `dsh.bundle` is installed as a plain dependency and never
-mounted. Confirm the row exists with `plugin_manager` `list_plugins`: a row id
-`model-manager`, `enabled: true`, `fiberPhase: active`. If it is missing, the profile
-needs a reload.
+**The test suite needs it too**, and fails less gracefully than the plugin does: without a
+resolvable schemastery, `edge` dies on `TypeError: plugin.Config is not a constructor` and
+`client-diagnostic` loses one assertion. This is a known rough edge — the suites should skip
+those cases with a warning instead of crashing. Create the symlink before running `npm test` on
+a fresh clone.
 
 **Restart the harness once after installing.** The client half reaches the browser through
 a boot manifest: the node half of `client-modules` scans the loader's entries for packages
@@ -88,21 +124,38 @@ configure control for this bundle.
 
 ```json
 {
-  "exports": { ".": "./lib/index.js", "./client": "./client.js", "./locale/*.json": "./locale/*.json" },
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
+  },
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
-    "client": { "platform": "web", "immediately": true, "inject": ["@deepseek-ai/dsh-client-ui-plugin-manager"] }
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-api-remotes"
+      ]
+    }
   }
 }
 ```
 
 `platform: "web"` is what makes this a browser module for the web shell, and `immediately:
 true` marks it for stage-one prefetch, so its factory is registered during module-face boot
-instead of on demand. `inject` is a *dependency edge*, not a mount whitelist: it names
-`@deepseek-ai/dsh-client-ui-plugin-manager`, the package whose module must arrive first
-because it declares the `plugins.row.config` slot used here. Without that package in the
-composition this half's registration has
-nothing to attach to, and the host half still routes.
+instead of on demand. `inject` is a *dependency edge*, not a mount whitelist: each named package
+has to arrive first because it declares something this half uses —
+`@deepseek-ai/dsh-client-locale` for `ctx.locale.register`, `@deepseek-ai/dsh-client-ui-settings`
+for the `settings.section` slot, and `@deepseek-ai/dsh-api-remotes` for the `remote.llm` and
+`remote.session` faces the card reads the model catalog and the usage projection through. If one
+is missing from the composition that registration has nothing to attach to; the host half still
+routes, and the boot log names the surface that never appeared.
 
 To smoke-test it before installing anything, mount the entry by path in a throwaway
 patch layer and boot the whole plugin tree headless — a plugin that breaks startup fails
@@ -160,44 +213,27 @@ row id; the card never edits patch files, so if a patch layer pins a value, edit
 
 ### Where the card appears
 
-`client.js` registers a single component in one configuration slot:
+`client.js` registers **two** surfaces and deliberately nothing on the Plugins page:
 
-| Slot | Key | Where the host renders it | Props |
-| --- | --- | --- | --- |
-| `plugins.row.config` | `dsh-model-manager#model-manager` (`<package name>#<row id>`) | The row's own page, opened from the configure control on the `model-manager` row | `{ view: 'page', form }` |
+| Slot | Registration id | What it renders |
+| --- | --- | --- |
+| `settings.section` | `model-manager` | The configuration card: the four roles and their model lists, the pick strategy, the distribution mode. |
+| `conversation.session.header.utilities` | `model-manager-usage` | The per-session model-usage summary the host half folds from the durable log. |
 
-That is the path: **Plugins → dsh-model-manager → the `model-manager` row → configure.**
-Registering `plugins.row.config` under `<package name>#<row id>` is also what makes the
-configure control *exist* — the page shows it only for rows whose key is registered.
+So the path is **设置 → 模型管理器** — not Plugins → the row → configure. `plugins.item` and
+`plugins.row.config` are *not* registered: one card in one place was the requirement, and a
+second copy on the Plugins page would only be a second place for the same values to disagree.
 
-**The bundle slot is not used here, because it cannot work.** The plugins page renders
-configuration slots in three places, and only one of them is given values:
+Both entries are registered **unconditionally** rather than behind the shipped
+`configForms.whileServed([ns], …)` gate. The Host serves a settings namespace only for a row
+whose Config schema has volatile fields, so that gate would hide the card entirely whenever the
+optional schemastery dependency failed to resolve — making a packaging problem look exactly like
+a missing feature. The entry is therefore always reachable, and the card itself reports why it
+cannot show values.
 
-| Render | Props passed to the slot |
-| --- | --- |
-| `plugins.row.config`, the row's page | `{ view: 'page', form }` |
-| `plugins.row.config`, the row's list line | `{ view: 'summary' }` — no `form` |
-| `plugins.bundle.config`, the bundle's page | `{ view: 'page' }` — no `form` |
-
-A card in the bundle section would receive no `form`, and without one it can neither read
-the current routes nor write new ones; registering it would add a permanently inert section
-to the bundle page. So this half contributes the row page exclusively, and the bundle page
-shows no configuration section for this plugin. (The only other render on that page that
-does carry a `form` is `plugins.item`, a different surface — the item list, not this
-bundle's row.)
-
-The row's **list line** is rendered through the same slot with `{ view: 'summary' }` and no
-`form`. Since there is nothing to summarise in that state, the card returns `null` and the
-row's own description stands — rather than asserting `No roles configured` about values it
-was never given. Given a `form`, the summary renders one compact line from each role's first
-route, joined with ` · `, for example:
-
-```text
-Planning and reasoning: qwen3.8-max-0902 · Execution: qwen3.8-flash · Image recognition: kimi-k3
-```
-
-Note the shape: the localized role label and the **model id alone** — no provider, and no
-second or third route from a `round-robin` list.
+The usage surface only subscribes to a finished value: the host half folds `modelManagerUsage`
+out of the durable session log and ships it as a wired projection, so there is no folding and no
+polling on the client, and the numbers survive a restart.
 
 ### What the card offers
 
@@ -293,13 +329,14 @@ the patch layer.
 **Verification status, stated honestly:** the client half was verified by JavaScript syntax,
 manifest validation, a structural load of the `window.__ModuleLoader__.load` factory — which
 confirms that only `react` is required, that `apply` registers the `dsh-model-manager` locale
-namespace (28 keys in each of English and Chinese) and exactly one slot,
-`plugins.row.config` under `dsh-model-manager#model-manager`, and that `apply` still returns
-normally when every injected collaborator throws — and inspection of the live slot contract
-in `@deepseek-ai/dsh-client-ui-plugin-manager`. **Visual verification of the rendered card is
-not available in this environment:** the harness's own verification guidance forbids
-emulating React/DOM or building mock previews as a substitute for a browser, so the rendered
-appearance is unverified. Remember the restart after installing, since the live slot only
+namespace with the same 46 keys in English and Chinese (the test compares the sorted key *sets*,
+not just their counts), that exactly two surfaces are injected — `settings.section` under
+`model-manager` and `conversation.session.header.utilities` under `model-manager-usage` — and
+that `apply` still returns normally when every injected collaborator throws. It was also checked
+against the live slot contract in `@deepseek-ai/dsh-client-ui-settings`. **Visual verification of
+the rendered card is not available in this environment:** the harness's own verification guidance
+forbids emulating React/DOM or building mock previews as a substitute for a browser, so the
+rendered appearance is unverified. Remember the restart after installing, since the live slot only
 populates once the client-module boot manifest has been rebuilt.
 
 ## Distribution strategy
@@ -553,7 +590,7 @@ The bundled layer this package ships is:
 ```yaml
 - insert:
     - id: model-manager
-      name: 'dsh-model-manager'
+      name: '@jyshangguan/dsh-model-manager'
       config:
         roles:
           main:
@@ -1005,11 +1042,12 @@ degrades to a notice or a log line.
 npm test
 ```
 
-Runs seven suites in child processes and aggregates the result — **652 assertions** at the time
+Runs eight suites in child processes and aggregates the result — **676 assertions** at the time
 of writing. Each suite also runs on its own: `node test/<name>.test.mjs`.
 
 | Suite | Assertions | What it pins |
 | --- | --- | --- |
+| `packaging.test.mjs` | 24 | The package identity that nothing else cross-checks: the scoped name is the one string the bundle patch's loader row, the client half's module id and the host half's `PACKAGE_NAME` must all agree on, while the cordis row id, the client row namespace and the locale namespace must all *stay* unscoped. Plus publishability (not private, public access, a real `@deepseek-ai/dsh` version gate that admits the runtime this was verified against, schemastery still optional) and tarball completeness — every `exports` target and every `files` pattern resolved against disk, so a published package cannot mount-less. Each identity assertion was mutation-checked: breaking any one of the four name sites, or "tidying" the row id or locale namespace to match, fails exactly one assertion. |
 | `routing.test.mjs` | 9 | The four roles route as documented; label classification; an explicit child route is respected; the tool and system-prompt section register; `apply` survives malformed configs. |
 | `edge.test.mjs` | 503 | Hostile configs, keyword anchoring and trimming, explicit-`[]`-disables versus absent-uses-defaults, round-robin committing only on apply, LRU eviction, the manager-owned rule, volatile settings reload, every `reason` string, the report/usage/routes output, and the generated allow-list YAML round-tripped through the **real** harness validator. |
 | `failover.test.mjs` | 24 | The failover chain and every guard: it walks to the end of the list and then stops rather than wrapping; `ABORTED`, `INVALID_REQUEST` and `IMAGE_OFFLOAD_REQUIRED` never fail over; a downstream recovery decision is passed through untouched; the per-step cap holds and resets on a new step; `round-robin` does wrap; single-model and disabled roles do nothing; a route outside the role's list is left alone; hostile payloads never throw; subagent chains fail over too. |
@@ -1098,13 +1136,12 @@ outside the repository.
   `reasoningEffort`, and the effort picker only renders when the newly selected model
   advertises efforts — so a stale effort can remain in the config with no control to clear
   it. Remove it in the patch layer.
-- **The card lives in exactly one place: the row's own page.** It registers
-  `plugins.row.config` under `dsh-model-manager#model-manager` and nothing else, because on
-  DSH 0.1.7-rc.2 that page render is the only configuration render the plugins supplies a
-  `form` to; a card in the bundle section could not read or write. The row's list-line
-  summary render passes no `form` either, so the card deliberately renders nothing there and
-  the row's description stands — which also means the compact `role: model` line is not
-  visible in the list today, only in the summary state a `form` provides.
+- **The card lives in exactly one place: 设置.** It registers `settings.section` under
+  `model-manager`, and nothing on the Plugins page — `plugins.item` and `plugins.row.config` are
+  deliberately not registered, so there is one copy of these values and one place to edit them.
+  The second surface, `conversation.session.header.utilities` under `model-manager-usage`, is
+  read-only: it shows the per-session model usage the host half folds from the durable log, and
+  writes nothing.
 - **The card needs one restart after installing**, because the client-module boot manifest
-  caches package metadata per loader specifier until restart. Before that the configure
-  control is simply absent.
+  caches package metadata per loader specifier until restart. Before that the Settings entry is
+  simply absent.

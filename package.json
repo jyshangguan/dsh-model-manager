@@ -1,10 +1,31 @@
 {
-  "name": "dsh-model-manager",
+  "name": "@jyshangguan/dsh-model-manager",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "Role-based model manager for DeepSeek Harness: assign models to planning, execution, vision and main roles, route subagent work by role, and report which model every subagent used.",
   "license": "MIT",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "cordis",
+    "model-routing",
+    "subagent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jyshangguan/dsh-model-manager.git"
+  },
+  "homepage": "https://github.com/jyshangguan/dsh-model-manager#readme",
+  "bugs": {
+    "url": "https://github.com/jyshangguan/dsh-model-manager/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./lib/index.js",
   "scripts": {
     "test": "node test/run-all.mjs"
@@ -27,6 +48,7 @@
     "README.md"
   ],
   "peerDependencies": {
+    "@deepseek-ai/dsh": ">=0.1.7-rc.2 <0.2.0",
     "@deepseek-ai/schemastery": "^3.18.0"
   },
   "peerDependenciesMeta": {
