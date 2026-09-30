@@ -22,18 +22,18 @@ configuration card to the Plugins page. There is no build step for either half.
 
 ## Install
 
-One command — straight from GitHub, or from a working copy:
+One command — from the registry, straight from GitHub, or from a working copy:
 
 ```bash
-# from GitHub, no publishing step; needs git access to the repo
+# from npm
+dsh plugin --profile desktop add @darkbear9494/dsh-model-manager@latest
+
+# from GitHub, no registry involved; needs git access to the repo
 dsh plugin --profile desktop add github:jyshangguan/dsh-model-manager
 
 # from a working copy (path must be absolute)
 git clone https://github.com/jyshangguan/dsh-model-manager.git
 dsh plugin --profile desktop add /absolute/path/to/dsh-model-manager
-
-# from npm — only after `npm publish`; see "Not on npm yet" below
-dsh plugin --profile desktop add @darkbear9494/dsh-model-manager@latest
 ```
 
 Use the profile your app actually boots. `dsh web` and the Web GUI run the `web` profile; the
@@ -61,29 +61,34 @@ should show row id `model-manager`, `enabled: true`, `fiberPhase: active`.
 The Plugins page's **Add plugin** field reads *"Enter the plugin's package name, GitHub repository
 address, or local directory path."* It is the GUI's `install_bundle`, and it parses the string
 through the same `parseInstallSpec` (`@deepseek-ai/dsh-plugin-manager/lib/types/install-spec.js`)
-before handing it to pnpm. Paste any one of:
+before handing it to pnpm. All four forms work:
 
 | Field input | Spec kind |
 | --- | --- |
+| `@darkbear9494/dsh-model-manager` | registry — the shortest one to type |
 | `github:jyshangguan/dsh-model-manager` | git — the `https://github.com/…` URL works too |
 | `/Users/you/src/dsh-model-manager` | absolute local directory (relative paths are refused) |
-| `/Users/you/dsh-model-manager-0.1.0.tgz` | local tarball — `npm pack` makes one, no registry needed |
-| `@darkbear9494/dsh-model-manager` | registry — needs the package published first |
+| `/Users/you/darkbear9494-dsh-model-manager-0.1.0.tgz` | local tarball — `npm pack` makes one |
 
-The **Add plugin** field prompts for a package name, and that is the one form that does not work
-yet; the other three do. Verified end-to-end on this runtime: the git and local-path forms both
-install, `reconcile()` appends the bundle, and the composed tree mounts row `model-manager`.
+Registering the plugin by name was verified end-to-end on this runtime: `dsh plugin --profile
+<name> add @darkbear9494/dsh-model-manager` resolves `^0.1.0` from the registry, `reconcile()`
+appends the bundle, the composed tree mounts row `model-manager`, and a boot reaches the LLM stage
+with no peer refusal and no loader error. The git and local-path forms were checked the same way.
 
-### Not on npm yet
+### The registry copy
 
-`@darkbear9494/dsh-model-manager` is **not published**. Asking for it by name fails at pnpm with
-`ERR_PNPM_FETCH_404: GET https://registry.npmjs.org/@jyshangguan%2Fdsh-model-manager: Not Found`.
-Publishing is the only thing standing between this plugin and the package-name form — the manifest
-is already public-access, unprivate, and `files` lists exactly what a mounted bundle needs, so
-`npm publish` from the repository root is the whole step. Until then use the **git** or **local
-path** form: both install the same tree a published tarball would contain, because every shipped
-file is committed and `files` limits the pack to them (verified — the git install delivers
-`lib/index.js`, `client.js`, `cordis.patch.yml`, `locale/*.json` and no `node_modules`).
+`@darkbear9494/dsh-model-manager@0.1.0` is published, public access, 8 files, 62.3 kB packed. Its
+declared gate is `>=0.1.7-rc.2 <0.3.0`, so it installs on the 0.2.0 line without an exemption.
+
+Two things learned while publishing it, in case a future version has to be released:
+
+- The scope has to equal the npm account, or name an organization the account belongs to. See
+  [Why the package is scoped](#why-the-package-is-scoped-and-why-the-scope-is-darkbear9494).
+- The registry's read path lags the write. Immediately after a successful `npm publish`
+  (`PUT 200`, `exit 0`) the packument can still answer `404 Not found` — and so can `npm view`,
+  `npm install` and a GUI install — while the tarball URL already returns `200`. It cleared on its
+  own in about five minutes here. Wait it out rather than republishing; the second `npm publish`
+  would fail on the version already existing.
 
 ### Why the package is scoped, and why the scope is `@darkbear9494`
 
