@@ -1,5 +1,5 @@
 /**
- * Failover tests for @jyshangguan/dsh-model-manager.
+ * Failover tests for @darkbear9494/dsh-model-manager.
  *
  * Drives the real plugin through a mock Cordis context whose `agent/request` and
  * `agent/request-error` waterfalls mirror the harness contract verified in

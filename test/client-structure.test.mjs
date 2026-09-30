@@ -97,7 +97,7 @@ const ctx = {
 };
 
 console.log('1. factory id, and modules required at load');
-console.log('   id      :', captured?.id, captured?.id === '@jyshangguan/dsh-model-manager' ? 'PASS' : 'FAIL');
+console.log('   id      :', captured?.id, captured?.id === '@darkbear9494/dsh-model-manager' ? 'PASS' : 'FAIL');
 console.log('   requires:', JSON.stringify(required), required.every((n) => n === 'react') ? 'PASS' : 'FAIL');
 
 console.log('\n2. exports');
@@ -154,7 +154,7 @@ try {
 }
 
 const checks = [
-  ['factory id is the package name', captured?.id === '@jyshangguan/dsh-model-manager'],
+  ['factory id is the package name', captured?.id === '@darkbear9494/dsh-model-manager'],
   ['only react is required', required.every((n) => n === 'react')],
   ['apply exported', typeof exported.apply === 'function'],
   ['locale registered and en/zh key sets match',

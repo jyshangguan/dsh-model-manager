@@ -1,5 +1,5 @@
 /**
- * Packaging invariants for @jyshangguan/dsh-model-manager.
+ * Packaging invariants for @darkbear9494/dsh-model-manager.
  *
  * The package name appears in four files that nothing else cross-checks:
  * package.json, the bundle patch's loader row, the client half's module-loader
@@ -33,7 +33,7 @@ const host = readFileSync(join(ROOT, 'lib/index.js'), 'utf8');
 
 console.log('\n1. identity');
 check('the package name is scoped under the owner',
-  NAME === '@jyshangguan/dsh-model-manager', NAME);
+  NAME === '@darkbear9494/dsh-model-manager', NAME);
 check('the unscoped name is not used — it is taken on npm by another plugin',
   !NAME.startsWith('dsh-') || NAME.includes('/'), NAME);
 check('the bundle patch mounts that exact package',

@@ -1,5 +1,5 @@
 /**
- * @jyshangguan/dsh-model-manager — Web client half.
+ * @darkbear9494/dsh-model-manager — Web client half.
  *
  * Contributes a configuration page for this plugin's own row on the Plugins
  * page. The row gains a configure control that opens a card with one model
@@ -23,10 +23,10 @@
  * volatile settings cards use. The host half re-reads its config on
  * `loader/volatile-update`, so a change takes effect without a restart.
  *
- * @module @jyshangguan/dsh-model-manager/client
+ * @module @darkbear9494/dsh-model-manager/client
  */
 window.__ModuleLoader__.load({
-  id: '@jyshangguan/dsh-model-manager',
+  id: '@darkbear9494/dsh-model-manager',
   factory(require) {
     const React = require('react');
     const h = React.createElement;

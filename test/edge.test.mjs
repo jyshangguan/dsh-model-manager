@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Adversarial edge-case suite for @jyshangguan/dsh-model-manager.
+ * Adversarial edge-case suite for @darkbear9494/dsh-model-manager.
  *
  * Goal: find defects, not confirm the plugin works. Every assertion prints
  * PASS/FAIL with observed vs expected; a single FAIL sets exit code 1.

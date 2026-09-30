@@ -1,5 +1,5 @@
 {
-  "name": "@jyshangguan/dsh-model-manager",
+  "name": "@darkbear9494/dsh-model-manager",
   "version": "0.1.0",
   "type": "module",
   "description": "Role-based model manager for DeepSeek Harness: assign models to planning, execution, vision and main roles, route subagent work by role, and report which model every subagent used.",

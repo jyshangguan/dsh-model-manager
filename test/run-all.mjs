@@ -51,7 +51,7 @@ let totalPassed = 0;
 let totalFailed = 0;
 let broken = 0;
 
-console.log('@jyshangguan/dsh-model-manager — test suite\n');
+console.log('@darkbear9494/dsh-model-manager — test suite\n');
 for (const [name, file, what] of SUITES) {
   const { code, out } = await run(file);
   const { passed, failed: suiteFailed } = tallyOf(out);

@@ -1,4 +1,4 @@
-# @jyshangguan/dsh-model-manager bundle patch (mount-only).
+# @darkbear9494/dsh-model-manager bundle patch (mount-only).
 #
 # This patch inserts only this plugin's own row. It deliberately does NOT touch
 # the `subagent-model-selection-settings` row: that row is already present in
@@ -13,7 +13,7 @@
 # `model-manager`, or edit it live on the Settings page (the schema is volatile).
 - insert:
     - id: model-manager
-      name: '@jyshangguan/dsh-model-manager'
+      name: '@darkbear9494/dsh-model-manager'
       config:
         roles:
           # Main agent outside plan mode. Empty = leave the composer choice alone.

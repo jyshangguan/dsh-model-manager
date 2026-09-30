@@ -1,4 +1,4 @@
-# @jyshangguan/dsh-model-manager
+# @darkbear9494/dsh-model-manager
 
 A host-half plugin for DeepSeek Harness that assigns models to four roles — `main`,
 `planning`, `execution`, `vision` — applies them on the `agent/request` waterfall, and
@@ -33,7 +33,7 @@ git clone https://github.com/jyshangguan/dsh-model-manager.git
 dsh plugin --profile desktop add /absolute/path/to/dsh-model-manager
 
 # from npm — only after `npm publish`; see "Not on npm yet" below
-dsh plugin --profile desktop add @jyshangguan/dsh-model-manager@latest
+dsh plugin --profile desktop add @darkbear9494/dsh-model-manager@latest
 ```
 
 Use the profile your app actually boots. `dsh web` and the Web GUI run the `web` profile; the
@@ -68,7 +68,7 @@ before handing it to pnpm. Paste any one of:
 | `github:jyshangguan/dsh-model-manager` | git — the `https://github.com/…` URL works too |
 | `/Users/you/src/dsh-model-manager` | absolute local directory (relative paths are refused) |
 | `/Users/you/dsh-model-manager-0.1.0.tgz` | local tarball — `npm pack` makes one, no registry needed |
-| `@jyshangguan/dsh-model-manager` | registry — needs the package published first |
+| `@darkbear9494/dsh-model-manager` | registry — needs the package published first |
 
 The **Add plugin** field prompts for a package name, and that is the one form that does not work
 yet; the other three do. Verified end-to-end on this runtime: the git and local-path forms both
@@ -76,7 +76,7 @@ install, `reconcile()` appends the bundle, and the composed tree mounts row `mod
 
 ### Not on npm yet
 
-`@jyshangguan/dsh-model-manager` is **not published**. Asking for it by name fails at pnpm with
+`@darkbear9494/dsh-model-manager` is **not published**. Asking for it by name fails at pnpm with
 `ERR_PNPM_FETCH_404: GET https://registry.npmjs.org/@jyshangguan%2Fdsh-model-manager: Not Found`.
 Publishing is the only thing standing between this plugin and the package-name form — the manifest
 is already public-access, unprivate, and `files` lists exactly what a mounted bundle needs, so
@@ -85,7 +85,7 @@ path** form: both install the same tree a published tarball would contain, becau
 file is committed and `files` limits the pack to them (verified — the git install delivers
 `lib/index.js`, `client.js`, `cordis.patch.yml`, `locale/*.json` and no `node_modules`).
 
-### Why the package is scoped
+### Why the package is scoped, and why the scope is `@darkbear9494`
 
 The unscoped name `dsh-model-manager` is **already taken on npm by a different plugin**: another
 DeepSeek Harness package whose Chinese display name is also 模型管理器, and which also declares
@@ -93,6 +93,14 @@ DeepSeek Harness package whose Chinese display name is also 模型管理器, and
 boot graph; were both ever mounted together their loader rows could collide on one id, which
 aborts startup with `duplicate loader entry id`. `test/packaging.test.mjs` pins the scoped name
 so this cannot silently regress.
+
+The scope is not decoration. npm accepts a **user-scoped** package only when the scope equals the
+authenticated npm username; anything else is refused at publish time with
+`404 Not Found - PUT https://registry.npmjs.org/@<scope>%2f<name> - Scope not found`, unless the
+scope is an organization you belong to. This package was briefly `@jyshangguan/dsh-model-manager`,
+which failed to publish for exactly that reason — `@jyshangguan` is a GitHub handle, not the npm
+account. `@darkbear9494` is the npm account, so scope and account agree and no organization is
+needed. If the publishing account ever changes, the package name has to change with it.
 
 ### The runtime version gate
 
@@ -103,7 +111,7 @@ peer — only names equal to `@deepseek-ai/dsh` or beginning `@deepseek-ai/dsh-`
 command:
 
 ```bash
-dsh plugin --profile desktop allow-version @jyshangguan/dsh-model-manager@0.1.0 \
+dsh plugin --profile desktop allow-version @darkbear9494/dsh-model-manager@0.1.0 \
   --dsh-version <exact runtime version> --accept-risk
 ```
 
@@ -158,7 +166,7 @@ Only a restart picks it up. Remove the old name, install the new one, then resta
 | `client.js` | Client half: the configuration card, contributed as a page in the Settings panel. |
 | `locale/en.json`, `locale/zh.json` | Display metadata only — the bundle's `title` and `description` in the plugin list. |
 | `cordis.patch.yml` | Bundle layer: inserts exactly one row, id `model-manager`. |
-| `package.json` | Package `@jyshangguan/dsh-model-manager`, declaring `dsh.bundle.patch`, `dsh.client`, and the `@deepseek-ai/dsh` version gate. |
+| `package.json` | Package `@darkbear9494/dsh-model-manager`, declaring `dsh.bundle.patch`, `dsh.client`, and the `@deepseek-ai/dsh` version gate. |
 | `test/` | The test suite; `npm test` runs all of it. See [Testing](#testing). |
 
 ### Making the schema dependency resolvable
@@ -666,7 +674,7 @@ The bundled layer this package ships is:
 ```yaml
 - insert:
     - id: model-manager
-      name: '@jyshangguan/dsh-model-manager'
+      name: '@darkbear9494/dsh-model-manager'
       config:
         roles:
           main:
