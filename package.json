@@ -48,7 +48,7 @@
     "README.md"
   ],
   "peerDependencies": {
-    "@deepseek-ai/dsh": ">=0.1.7-rc.2 <0.2.0",
+    "@deepseek-ai/dsh": ">=0.1.7-rc.2 <0.3.0",
     "@deepseek-ai/schemastery": "^3.18.0"
   },
   "peerDependenciesMeta": {

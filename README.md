@@ -22,19 +22,24 @@ configuration card to the Plugins page. There is no build step for either half.
 
 ## Install
 
-One command — from the registry, straight from GitHub, or from a working copy:
+One command — straight from GitHub, or from a working copy:
 
 ```bash
-# from npm
-dsh plugin --profile web add @jyshangguan/dsh-model-manager@latest
-
 # from GitHub, no publishing step; needs git access to the repo
-dsh plugin --profile web add github:jyshangguan/dsh-model-manager
+dsh plugin --profile desktop add github:jyshangguan/dsh-model-manager
 
-# from a working copy
+# from a working copy (path must be absolute)
 git clone https://github.com/jyshangguan/dsh-model-manager.git
-dsh plugin --profile web add /absolute/path/to/dsh-model-manager
+dsh plugin --profile desktop add /absolute/path/to/dsh-model-manager
+
+# from npm — only after `npm publish`; see "Not on npm yet" below
+dsh plugin --profile desktop add @jyshangguan/dsh-model-manager@latest
 ```
+
+Use the profile your app actually boots. `dsh web` and the Web GUI run the `web` profile; the
+desktop app (DeepSeek Harness.app) runs **`desktop`**, so a plugin installed into `web` is
+invisible there. When in doubt, check the running process's working directory: it is
+`$DSH_HOME/profiles/<name>`.
 
 `dsh plugin` forwards everything after `--profile <name>` to **pnpm, run inside the profile
 directory** under a file lock (`lib/bin.js` → `runPlugin` → `runPluginCommand` in
@@ -48,8 +53,37 @@ dependency that declares no `dsh.bundle` prints `installed as a plain dependency
 layer` and is never mounted. The profile-layer registration you would otherwise hand-edit is the
 installer's job.
 
-Then **restart the harness once** (below) and confirm the row mounted: `plugin_manager`
-`list_plugins` should show row id `model-manager`, `enabled: true`, `fiberPhase: active`.
+Then **restart the harness once** and confirm the row mounted: `plugin_manager` `list_plugins`
+should show row id `model-manager`, `enabled: true`, `fiberPhase: active`.
+
+### Add plugin, from the Plugins page
+
+The Plugins page's **Add plugin** field reads *"Enter the plugin's package name, GitHub repository
+address, or local directory path."* It is the GUI's `install_bundle`, and it parses the string
+through the same `parseInstallSpec` (`@deepseek-ai/dsh-plugin-manager/lib/types/install-spec.js`)
+before handing it to pnpm. Paste any one of:
+
+| Field input | Spec kind |
+| --- | --- |
+| `github:jyshangguan/dsh-model-manager` | git — the `https://github.com/…` URL works too |
+| `/Users/you/src/dsh-model-manager` | absolute local directory (relative paths are refused) |
+| `/Users/you/dsh-model-manager-0.1.0.tgz` | local tarball — `npm pack` makes one, no registry needed |
+| `@jyshangguan/dsh-model-manager` | registry — needs the package published first |
+
+The **Add plugin** field prompts for a package name, and that is the one form that does not work
+yet; the other three do. Verified end-to-end on this runtime: the git and local-path forms both
+install, `reconcile()` appends the bundle, and the composed tree mounts row `model-manager`.
+
+### Not on npm yet
+
+`@jyshangguan/dsh-model-manager` is **not published**. Asking for it by name fails at pnpm with
+`ERR_PNPM_FETCH_404: GET https://registry.npmjs.org/@jyshangguan%2Fdsh-model-manager: Not Found`.
+Publishing is the only thing standing between this plugin and the package-name form — the manifest
+is already public-access, unprivate, and `files` lists exactly what a mounted bundle needs, so
+`npm publish` from the repository root is the whole step. Until then use the **git** or **local
+path** form: both install the same tree a published tarball would contain, because every shipped
+file is committed and `files` limits the pack to them (verified — the git install delivers
+`lib/index.js`, `client.js`, `cordis.patch.yml`, `locale/*.json` and no `node_modules`).
 
 ### Why the package is scoped
 
@@ -62,12 +96,14 @@ so this cannot silently regress.
 
 ### The runtime version gate
 
-`peerDependencies["@deepseek-ai/dsh"]` is `>=0.1.7-rc.2 <0.2.0`. The harness checks exactly that
+`peerDependencies["@deepseek-ai/dsh"]` is `>=0.1.7-rc.2 <0.3.0`. The harness checks exactly that
 peer — only names equal to `@deepseek-ai/dsh` or beginning `@deepseek-ai/dsh-` — with semver,
-prereleases included, and refuses an incompatible install while printing the exemption command:
+**prereleases included** (`semver.satisfies(runtime, range, { includePrerelease: true })` in
+`@deepseek-ai/dsh-app-boot`), and refuses an incompatible install while printing the exemption
+command:
 
 ```bash
-dsh plugin --profile web allow-version @jyshangguan/dsh-model-manager@0.1.0 \
+dsh plugin --profile desktop allow-version @jyshangguan/dsh-model-manager@0.1.0 \
   --dsh-version <exact runtime version> --accept-risk
 ```
 
@@ -75,6 +111,28 @@ Without that peer this plugin would install silently onto a harness too old to h
 `sessionProjections.stateOf` or the `model/selection` event, and then degrade with no
 explanation. Profiles ship `autoInstallPeers: false`, so declaring the peer does not pull a
 second copy of dsh into the profile.
+
+The range was `>=0.1.7-rc.2 <0.2.0` through 0.1.0, and that upper bound did not mean what it
+looked like. In semver a prerelease sorts *below* its release, so `0.2.0-rc.2 < 0.2.0` is true:
+the old range admitted **every 0.2.0 prerelease** while excluding `0.2.0` itself. It therefore
+permitted exactly the builds nobody had tested and blocked the release it appeared to target.
+`<0.3.0` is what it was meant to say, and it now covers the whole 0.2.0 line deliberately.
+
+The 0.2.0 line is admitted because the host half is verified against it. Against **dsh
+0.2.0-rc.2** — the core bundled in DeepSeek Harness.app 0.2.0-rc.2 and the `latest` tag on npm —
+every API this plugin touches is unchanged from 0.1.7-rc.2: `dsh-session-projection`
+(`stateOf`), `dsh-plan-mode`, `dsh-agent`, `dsh-subagent`, `dsh-tool-subagent` +
+`model-selection-settings`, `dsh-tools`, `dsh-llm`, `dsh-session` and `dsh-client-modules` are
+byte-identical, all five subscribed events and every probed service still exist, and all 22
+failover `failure.code` values are still emitted. A real boot on that runtime applied the host
+half, bound every event, resolved every injection and registered the `model_manager` tool. The
+client half is unchanged too: `window.__ModuleLoader__.load({ id, factory })`, the `dsh.client`
+manifest keys and every injected namespace still match what 0.2.0 provides.
+
+What did change between the two runtimes touches nothing here: `dsh-agent-loop` adds
+`ToolCallRecovery` on step failure, `dsh-session` refactors tail repair, `dsh-config-editor`
+changes how inherited config composes, and `dsh-api-remotes` gains transport code plus two
+namespaces (`productAnalytics`, `userQuestions`) with **no removals**.
 
 ### Renaming or moving a linked install
 
@@ -1060,12 +1118,12 @@ degrades to a notice or a log line.
 npm test
 ```
 
-Runs eight suites in child processes and aggregates the result — **676 assertions** at the time
+Runs eight suites in child processes and aggregates the result — **683 assertions** at the time
 of writing. Each suite also runs on its own: `node test/<name>.test.mjs`.
 
 | Suite | Assertions | What it pins |
 | --- | --- | --- |
-| `packaging.test.mjs` | 24 | The package identity that nothing else cross-checks: the scoped name is the one string the bundle patch's loader row, the client half's module id and the host half's `PACKAGE_NAME` must all agree on, while the cordis row id, the client row namespace and the locale namespace must all *stay* unscoped. Plus publishability (not private, public access, a real `@deepseek-ai/dsh` version gate that admits the runtime this was verified against, schemastery still optional) and tarball completeness — every `exports` target and every `files` pattern resolved against disk, so a published package cannot mount-less. Each identity assertion was mutation-checked: breaking any one of the four name sites, or "tidying" the row id or locale namespace to match, fails exactly one assertion. |
+| `packaging.test.mjs` | 31 | The package identity that nothing else cross-checks: the scoped name is the one string the bundle patch's loader row, the client half's module id and the host half's `PACKAGE_NAME` must all agree on, while the cordis row id, the client row namespace and the locale namespace must all *stay* unscoped. Plus publishability (not private, public access, a real `@deepseek-ai/dsh` version gate, schemastery still optional) and tarball completeness — every `exports` target and every `files` pattern resolved against disk, so a published package cannot mount-less. The gate is not string-matched: a self-validating semver comparator (prerelease-aware, and checked against the ordering trap first) proves the declared range admits 0.1.7-rc.2, 0.2.0-rc.2 **and** 0.2.0 while refusing 0.1.6 and 0.3.0 — because `<0.2.0` reads as "every 0.2.0 prerelease" while excluding 0.2.0 itself. Each identity assertion was mutation-checked: breaking any one of the four name sites, or "tidying" the row id or locale namespace to match, fails exactly one assertion; reverting the upper bound to `<0.2.0` fails exactly two. |
 | `routing.test.mjs` | 9 | The four roles route as documented; label classification; an explicit child route is respected; the tool and system-prompt section register; `apply` survives malformed configs. |
 | `edge.test.mjs` | 503 | Hostile configs, keyword anchoring and trimming, explicit-`[]`-disables versus absent-uses-defaults, round-robin committing only on apply, LRU eviction, the manager-owned rule, volatile settings reload, every `reason` string, the report/usage/routes output, and the generated allow-list YAML round-tripped through the **real** harness validator. |
 | `failover.test.mjs` | 24 | The failover chain and every guard: it walks to the end of the list and then stops rather than wrapping; `ABORTED`, `INVALID_REQUEST` and `IMAGE_OFFLOAD_REQUIRED` never fail over; a downstream recovery decision is passed through untouched; the per-step cap holds and resets on a new step; `round-robin` does wrap; single-model and disabled roles do nothing; a route outside the role's list is left alone; hostile payloads never throw; subagent chains fail over too. |

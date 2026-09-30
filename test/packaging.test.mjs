@@ -66,9 +66,63 @@ check('the runtime version gate is declared and is not a wildcard',
     && manifest.peerDependencies['@deepseek-ai/dsh'].trim() !== '*'
     && manifest.peerDependencies['@deepseek-ai/dsh'].trim() !== '',
   JSON.stringify(manifest.peerDependencies?.['@deepseek-ai/dsh']));
-check('the gate admits the runtime this plugin was verified against',
-  manifest.peerDependencies['@deepseek-ai/dsh'].includes('0.1.7-rc.2'),
-  manifest.peerDependencies['@deepseek-ai/dsh']);
+
+// The gate is not a string to eyeball: the harness evaluates it with
+// `includePrerelease: true`, and prerelease ordering is the trap. A prerelease
+// sorts BELOW its release, so `0.2.0-rc.2 < 0.2.0` is true and a `<0.2.0` upper
+// bound admits every 0.2.0 prerelease while excluding 0.2.0 itself. The
+// comparator is deliberately tiny and self-validating: the first assertion
+// below fails if its ordering is wrong, so the ones after it mean something.
+const parseVersion = (v) => {
+  const m = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(v);
+  if (m === null) throw new Error(`not a version: ${v}`);
+  return { nums: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] === undefined ? [] : m[4].split('.') };
+};
+const compareVersions = (a, b) => {
+  const A = parseVersion(a);
+  const B = parseVersion(b);
+  for (let i = 0; i < 3; i++) if (A.nums[i] !== B.nums[i]) return A.nums[i] < B.nums[i] ? -1 : 1;
+  if (A.pre.length === 0 || B.pre.length === 0) {
+    if (A.pre.length === B.pre.length) return 0;
+    return A.pre.length === 0 ? 1 : -1;
+  }
+  for (let i = 0; i < Math.max(A.pre.length, B.pre.length); i++) {
+    const x = A.pre[i];
+    const y = B.pre[i];
+    if (x === undefined || y === undefined) return x === undefined ? -1 : 1;
+    const xn = /^\d+$/.test(x);
+    const yn = /^\d+$/.test(y);
+    if (xn && yn) { if (Number(x) !== Number(y)) return Number(x) < Number(y) ? -1 : 1; }
+    else if (xn !== yn) return xn ? -1 : 1;
+    else if (x !== y) return x < y ? -1 : 1;
+  }
+  return 0;
+};
+check('the comparator orders prereleases the way semver does (a release outranks its prereleases)',
+  compareVersions('0.2.0-rc.2', '0.2.0') === -1
+    && compareVersions('0.2.0', '0.2.0-rc.2') === 1
+    && compareVersions('0.1.7-rc.1', '0.1.7-rc.2') === -1
+    && compareVersions('0.2.0', '0.2.0') === 0
+    && compareVersions('0.1.7', '0.2.0') === -1);
+
+const DSH_PEER = manifest.peerDependencies?.['@deepseek-ai/dsh'] ?? '';
+const gate = /^>=(.+?)\s+<(.+)$/.exec(DSH_PEER.trim());
+const admits = (v) => gate !== null
+  && compareVersions(v, gate[1].trim()) >= 0 && compareVersions(v, gate[2].trim()) < 0;
+check('the gate is a lower-and-upper bound the comparator can read',
+  gate !== null, DSH_PEER);
+check('the gate admits 0.1.7-rc.2, the runtime the plugin was written against',
+  admits('0.1.7-rc.2'), DSH_PEER);
+check('the gate admits 0.2.0-rc.2, the runtime both halves were verified against',
+  admits('0.2.0-rc.2'), DSH_PEER);
+check('the gate admits 0.2.0 itself, so shipping rc.2 does not push the plugin out of range',
+  admits('0.2.0'), DSH_PEER);
+check('the gate refuses 0.3.0, a line nothing here has been tested on',
+  !admits('0.3.0'), DSH_PEER);
+check('the gate refuses a runtime older than the one it was written against',
+  !admits('0.1.6'), DSH_PEER);
+check('the upper bound is not <0.2.0, which semver reads as "every 0.2.0 prerelease"',
+  !DSH_PEER.includes('<0.2.0'), DSH_PEER);
 check('schemastery stays an optional peer so a resolution failure degrades',
   manifest.peerDependenciesMeta?.['@deepseek-ai/schemastery']?.optional === true,
   JSON.stringify(manifest.peerDependenciesMeta));
