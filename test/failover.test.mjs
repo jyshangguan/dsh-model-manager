@@ -177,7 +177,7 @@ console.log('\n=== D. per-step switch cap ===');
 console.log('\n=== E. round-robin wraps instead of terminating ===');
 {
   const w = makeWorld();
-  plugin.apply(w.ctx, cfg({ main: { models: [M('A'), M('B'), M('C')], pick: 'round-robin' } }));
+  plugin.apply(w.ctx, cfg({ main: { models: [M('A'), M('B'), M('C')] } }, { pick: 'round-robin' }));
   const a = w.addAgent('s-e', M('A'));
   await w.request(a, M('A'));
   const seen = [];

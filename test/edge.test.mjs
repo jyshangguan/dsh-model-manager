@@ -365,7 +365,7 @@ function makeCtx(options = {}) {
 }
 
 /** config helper: unconfigured roles are explicit empty, so tests never rely on defaults */
-function cfg({ mode = 'hybrid', roles = {}, strategy = {} } = {}) {
+function cfg({ mode = 'hybrid', pick, roles = {}, strategy = {} } = {}) {
   const base = {
     main: { models: [] },
     planning: { models: [] },
@@ -373,7 +373,11 @@ function cfg({ mode = 'hybrid', roles = {}, strategy = {} } = {}) {
     vision: { models: [] },
   };
   for (const key of Object.keys(roles)) base[key] = roles[key];
-  return { roles: base, strategy: { mode, ...strategy } };
+  return {
+    ...(pick !== undefined ? { pick } : {}),
+    roles: base,
+    strategy: { mode, ...strategy },
+  };
 }
 
 /** silence the console for hostile-context tests that fall back to console logging */
@@ -435,7 +439,9 @@ section('B. readConfig normalization and hostile configs');
     ['models:string', { roles: { vision: { models: 'x' } } }],
     ['models with junk', { roles: { vision: { models: [null, {}, 'x', 7, { provider: ' a ', model: ' b ' }] } } }],
     ['blank routes', { roles: { vision: { models: [{ provider: '', model: '' }, { provider: '   ', model: '  ' }] } } }],
-    ['pick invalid', { roles: { execution: { pick: 'nonsense', models: [M('e')] } } }],
+    ['role pick legacy', { roles: { execution: { pick: 'round-robin', models: [M('e')] } } }],
+    ['top-level pick invalid', { pick: 'nonsense', roles: {} }],
+    ['top-level pick non-string', { pick: 7, roles: {} }],
     ['strategy:null', { strategy: null }],
     ['strategy:string', { strategy: 'x' }],
     ['mode invalid', { strategy: { mode: 'nonsense' } }],
@@ -464,11 +470,12 @@ section('B. readConfig normalization and hostile configs');
     check(`B  role keys total [${name}]`, JSON.stringify(Object.keys(read.roles).sort()) === JSON.stringify(['execution', 'main', 'planning', 'vision']), Object.keys(read.roles), ['execution', 'main', 'planning', 'vision']);
     const rolesOk = ['main', 'planning', 'execution', 'vision'].every((key) => {
       const role = read.roles[key];
-      const pickOk = role.pick === 'first' || role.pick === 'round-robin';
       const modelsOk = Array.isArray(role.models) && role.models.every((route) => typeof route.provider === 'string' && route.provider.trim() !== '' && typeof route.model === 'string' && route.model.trim() !== '');
-      return pickOk && modelsOk;
+      const pickGone = !('pick' in role);
+      return pickGone && modelsOk;
     });
-    check(`B  role shape total [${name}]`, rolesOk, read.roles, 'valid picks + trimmed non-empty routes');
+    check(`B  role shape total [${name}]`, rolesOk, read.roles, 'no role pick (top-level since 0.2.0) + trimmed non-empty routes');
+    check(`B  top-level pick total [${name}]`, read.pick === 'first' || read.pick === 'round-robin', read.pick, 'first|round-robin');
     check(`B  mode total [${name}]`, ['hybrid', 'managed', 'advisory'].includes(read.strategy.mode), read.strategy.mode, 'one of hybrid|managed|advisory');
     check(`B  keyword lists are arrays [${name}]`, Array.isArray(read.strategy.visionKeywords) && Array.isArray(read.strategy.planningKeywords), { v: read.strategy.visionKeywords, p: read.strategy.planningKeywords }, 'both arrays');
     check(`B  historyLimit is a usable positive integer [${name}]`, Number.isInteger(read.strategy.historyLimit) && read.strategy.historyLimit >= 1, read.strategy.historyLimit, 'integer >= 1');
@@ -516,7 +523,18 @@ section('B. readConfig normalization and hostile configs');
   check('B  unknown role-level key warns', warnings.some((line) => line.includes('unknown key "roles.main.typo"')), warnings, 'warning naming roles.main.typo');
   check('B  unknown strategy-level key warns', warnings.some((line) => line.includes('unknown key "strategy.bogus2"')), warnings, 'warning naming strategy.bogus2');
   check('B  unknown role name warns', warnings.some((line) => line.includes('unknown role "nope"')), warnings, 'warning naming the unknown role');
-  eq('B  a valid config produces no warnings', readConfig({ roles: { main: { models: [M('m')], pick: 'first', note: 'n' } }, strategy: { mode: 'managed', historyLimit: 5, visionKeywords: ['a'], planningKeywords: ['b'] } }).warnings, []);
+
+  // -- the 0.2.0 pick migration: one top-level strategy, per-role values ignored
+  const legacy = readConfig({ roles: { execution: { pick: 'round-robin', models: [M('e')] } } });
+  check('B  a legacy per-role pick warns about the move', legacy.warnings.some((line) => line.includes('"roles.execution.pick" moved to the top-level "pick"')), legacy.warnings, 'migration warning');
+  eq('B  a legacy per-role pick does not reach the normalized roles', 'pick' in legacy.roles.execution, false);
+  eq('B  a legacy per-role pick does not set the strategy', legacy.pick, 'first');
+  eq('B  a top-level round-robin pick normalizes through', readConfig({ pick: 'round-robin' }).pick, 'round-robin');
+  eq('B  an absent pick defaults to first', readConfig({}).pick, 'first');
+  eq('B  an invalid pick falls back to first', readConfig({ pick: 'nonsense' }).pick, 'first');
+  const schemaPick = readConfig(new plugin.Config({ pick: 'round-robin', roles: {} }));
+  eq('B  the Config schema accepts and defaults the top-level pick', schemaPick.pick, 'round-robin');
+  eq('B  a valid config produces no warnings', readConfig({ pick: 'first', roles: { main: { models: [M('m')], note: 'n' } }, strategy: { mode: 'managed', historyLimit: 5, visionKeywords: ['a'], planningKeywords: ['b'] } }).warnings, []);
   eq('B  a schema-validated config produces no warnings', readConfig(new plugin.Config({ roles: { vision: { models: [M('v')] } }, strategy: { mode: 'managed' } })).warnings, []);
   const hWarn = makeCtx();
   apply(hWarn.ctx, { bogus: 1, roles: {}, strategy: {} });
@@ -563,7 +581,7 @@ section('C. routing: round-robin, first, effort, main, plan mode, vision fallbac
 {
   // -- round-robin -----------------------------------------------------------
   const h = makeCtx();
-  apply(h.ctx, cfg({ mode: 'managed', roles: { execution: { models: [M('E1'), M('E2'), M('E3')], pick: 'round-robin' } } }));
+  apply(h.ctx, cfg({ mode: 'managed', pick: 'round-robin', roles: { execution: { models: [M('E1'), M('E2'), M('E3')] } } }));
   const parent = addParent(h.world, 'p-rr', M('default'));
   const child = addChild(h.world, parent, 'c-rr', 'fix the typo', M('default'));
   const cycle = [];
@@ -571,7 +589,7 @@ section('C. routing: round-robin, first, effort, main, plan mode, vision fallbac
   eq('C1 round-robin cycles 1,2,3,1,2,3,1', cycle, ['E1', 'E2', 'E3', 'E1', 'E2', 'E3', 'E1']);
 
   const hf = makeCtx();
-  apply(hf.ctx, cfg({ mode: 'managed', roles: { execution: { models: [M('F1'), M('F2'), M('F3')], pick: 'first' } } }));
+  apply(hf.ctx, cfg({ mode: 'managed', roles: { execution: { models: [M('F1'), M('F2'), M('F3')] } } }));
   const p2 = addParent(hf.world, 'p-first', M('default'));
   const c2 = addChild(hf.world, p2, 'c-first', 'fix the typo', M('default'));
   const firsts = [];
@@ -580,7 +598,7 @@ section('C. routing: round-robin, first, effort, main, plan mode, vision fallbac
 
   // -- independent counters per role ----------------------------------------
   const hi = makeCtx();
-  apply(hi.ctx, cfg({ mode: 'managed', roles: { main: { models: [M('M1'), M('M2')], pick: 'round-robin' }, execution: { models: [M('X1'), M('X2')], pick: 'round-robin' } } }));
+  apply(hi.ctx, cfg({ mode: 'managed', pick: 'round-robin', roles: { main: { models: [M('M1'), M('M2')] }, execution: { models: [M('X1'), M('X2')] } } }));
   const p3 = addParent(hi.world, 'p-ind', M('default'));
   const c3 = addChild(hi.world, p3, 'c-ind', 'fix the typo', M('default'));
   const seq = [];
@@ -669,12 +687,12 @@ section('C. routing: round-robin, first, effort, main, plan mode, vision fallbac
   check('C17 vision AND execution empty -> no rewrite (identity)', outVV === both, outVV === both, true);
 
   const hvr = makeCtx();
-  apply(hvr.ctx, cfg({ mode: 'managed', roles: { execution: { models: [M('X1'), M('X2')], pick: 'round-robin' } } }));
+  apply(hvr.ctx, cfg({ mode: 'managed', pick: 'round-robin', roles: { execution: { models: [M('X1'), M('X2')] } } }));
   const pvr = addParent(hvr.world, 'p-vis3', M('default'));
   const cvr = addChild(hvr.world, pvr, 'c-vis3', 'screenshot', M('default'));
   const visionCycle = [];
   for (let i = 0; i < 3; i += 1) visionCycle.push((await hvr.request(cvr, M('default'))).model);
-  eq('C18 vision fallback honours execution pick=round-robin', visionCycle, ['X1', 'X2', 'X1']);
+  eq('C18 vision fallback honours the shared pick=round-robin', visionCycle, ['X1', 'X2', 'X1']);
 }
 
 // ===========================================================================
@@ -812,6 +830,7 @@ section('F. tools: report / routes / usage / allow-list');
   const routesOut = await tool0.execute({ action: 'routes' });
   check('F5 routes lists all four roles', ['main', 'planning', 'execution', 'vision'].every((key) => routesOut.includes(key)), routesOut.split('\n').slice(0, 6), 'all four role names');
   check('F6 routes names the active mode', routesOut.includes('hybrid'), routesOut.split('\n').find((line) => line.startsWith('Strategy mode')), 'Strategy mode: hybrid…');
+  check('F6b routes names the shared selection strategy', /^Selection: first —/m.test(routesOut), routesOut.split('\n').find((line) => line.startsWith('Selection')), 'Selection: first — …');
   check('F7 unknown action falls back to report', (await tool0.execute({ action: 'bogus' })).startsWith('No subagents observed yet'), 'unknown action output', 'report output');
   check('F8 missing args default to report', (await tool0.execute()).startsWith('No subagents observed yet'), 'no-arg output', 'report output');
 
@@ -937,7 +956,7 @@ section('F. tools: report / routes / usage / allow-list');
   const routesNote = await hNote.tool().execute({ action: 'routes' });
   check('F22 routes prints a note for a role', routesNote.includes('note: the workhorse'), routesNote.split('\n').filter((line) => line.includes('note:')), 'note line');
   check('F22b routes marks the vision->execution fallback', routesNote.includes('(via execution)'), routesNote.split('\n').find((line) => line.startsWith('vision')), 'vision row with (via execution)');
-  check('F22c routes shows the vision row using the execution model', /vision\s+first\s+pku-corpus\/EXEC\s+\(via execution\)/.test(routesNote), routesNote.split('\n').find((line) => line.startsWith('vision')), 'vision  first  pku-corpus/EXEC  (via execution)');
+  check('F22c routes shows the vision row using the execution model', /vision\s+pku-corpus\/EXEC\s+\(via execution\)/.test(routesNote), routesNote.split('\n').find((line) => line.startsWith('vision')), 'vision  pku-corpus/EXEC  (via execution)');
 
   // -- D6 regression: the shared vision->execution fallback must be counted once,
   //    because the harness REJECTS a repeated `allowedModels` entry.
@@ -1018,7 +1037,8 @@ section('F. tools: report / routes / usage / allow-list');
   const hRt = makeCtx({ world: rtWorld });
   apply(hRt.ctx, cfg({
     mode: 'managed',
-    roles: { main: { models: [M('M1')] }, planning: { models: [M('P1')] }, execution: { models: [M('E1'), M('E2')], pick: 'round-robin' }, vision: { models: [] } },
+    pick: 'round-robin',
+    roles: { main: { models: [M('M1')] }, planning: { models: [M('P1')] }, execution: { models: [M('E1'), M('E2')] }, vision: { models: [] } },
   }));
   const routesRt = await hRt.tool().execute({ action: 'routes' });
   const rtSnippet = parseSnippet(routesRt);
@@ -1433,7 +1453,7 @@ section('J. hybrid inheritance vs the route DSH actually persists (likely defect
 
   // J6e: failing closed must not advance the rotation (didApply === false)
   const h6e = makeCtx();
-  apply(h6e.ctx, cfg({ mode: 'hybrid', roles: { execution: { models: [M('R1'), M('R2')], pick: 'round-robin' } } }));
+  apply(h6e.ctx, cfg({ mode: 'hybrid', pick: 'round-robin', roles: { execution: { models: [M('R1'), M('R2')] } } }));
   const p6e = addParent(h6e.world, 'p-nolineage-rr', M('PARENT-OPTIONS'));
   h6e.world.breakOwnership = true;
   const ghost = addChild(h6e.world, p6e, 'hyb00009-child', 'fix the typo', M('PARENT-OPTIONS'));
@@ -1448,7 +1468,8 @@ section('J. hybrid inheritance vs the route DSH actually persists (likely defect
   const hOw = makeCtx();
   apply(hOw.ctx, cfg({
     mode: 'hybrid',
-    roles: { execution: { models: [M('E1'), M('E2')], pick: 'round-robin' } },
+    pick: 'round-robin',
+    roles: { execution: { models: [M('E1'), M('E2')] } },
     strategy: { historyLimit: 1 },
   }));
   const pOw = addParent(hOw.world, 'p-lru-own', M('PARENT'));
@@ -1481,7 +1502,7 @@ section('J. hybrid inheritance vs the route DSH actually persists (likely defect
 
   // -- the manager-owned rule: a routed child keeps being managed --------------
   const h9 = makeCtx();
-  apply(h9.ctx, cfg({ mode: 'hybrid', roles: { execution: { models: [M('E1'), M('E2')], pick: 'round-robin' } } }));
+  apply(h9.ctx, cfg({ mode: 'hybrid', pick: 'round-robin', roles: { execution: { models: [M('E1'), M('E2')] } } }));
   const p9 = addParent(h9.world, 'p-owned', M('PARENT'));
   const rowOf = async (h, id) => (await h.tool().execute({ action: 'report' })).split('\n').find((line) => line.includes(id)) ?? '(no row)';
 
@@ -1496,7 +1517,7 @@ section('J. hybrid inheritance vs the route DSH actually persists (likely defect
 
   // a respected explicit choice must never be re-adopted as manager-owned
   const h10 = makeCtx();
-  apply(h10.ctx, cfg({ mode: 'hybrid', roles: { execution: { models: [M('E1'), M('E2')], pick: 'round-robin' } } }));
+  apply(h10.ctx, cfg({ mode: 'hybrid', pick: 'round-robin', roles: { execution: { models: [M('E1'), M('E2')] } } }));
   const p10 = addParent(h10.world, 'p-explicit', M('PARENT'));
   const expl = addChild(h10.world, p10, 'exp00001-child', 'fix the typo', M('CHOSEN'));
   routeEq('J9 the explicit route is respected on turn 1', await h10.request(expl, M('CHOSEN')), PK, 'CHOSEN');
@@ -1519,7 +1540,7 @@ section('M. round-robin commits only when a route is actually applied');
 {
   // advisory: the rotation must not be consumed (and no route may be rewritten)
   const hAdv = makeCtx();
-  apply(hAdv.ctx, cfg({ mode: 'advisory', roles: { execution: { models: [M('R1'), M('R2')], pick: 'round-robin' } } }));
+  apply(hAdv.ctx, cfg({ mode: 'advisory', pick: 'round-robin', roles: { execution: { models: [M('R1'), M('R2')] } } }));
   const pAdv = addParent(hAdv.world, 'p-rr-adv', M('default'));
   const cAdv = addChild(hAdv.world, pAdv, 'rradv001-child', 'fix the typo', M('default'));
   const advOut = [];
@@ -1531,7 +1552,7 @@ section('M. round-robin commits only when a route is actually applied');
 
   // hybrid: two respected explicit choices must not consume rotation slots
   const hExp = makeCtx();
-  apply(hExp.ctx, cfg({ mode: 'hybrid', roles: { execution: { models: [M('R1'), M('R2')], pick: 'round-robin' } } }));
+  apply(hExp.ctx, cfg({ mode: 'hybrid', pick: 'round-robin', roles: { execution: { models: [M('R1'), M('R2')] } } }));
   const pExp = addParent(hExp.world, 'p-rr-exp', M('PARENT'));
   const e1 = addChild(hExp.world, pExp, 'rrexp001-child', 'fix the typo', M('EXPLICIT-1'));
   const e2 = addChild(hExp.world, pExp, 'rrexp002-child', 'fix the typo', M('EXPLICIT-2'));
@@ -1544,7 +1565,7 @@ section('M. round-robin commits only when a route is actually applied');
   // managed: a route that is already correct still consumes a rotation slot,
   // otherwise the rotation would stall whenever the resolved route coincides
   const hSame = makeCtx();
-  apply(hSame.ctx, cfg({ mode: 'managed', roles: { execution: { models: [M('R1'), M('R2')], pick: 'round-robin' } } }));
+  apply(hSame.ctx, cfg({ mode: 'managed', pick: 'round-robin', roles: { execution: { models: [M('R1'), M('R2')] } } }));
   const pSame = addParent(hSame.world, 'p-rr-same', M('default'));
   const cSame = addChild(hSame.world, pSame, 'rrsame01-child', 'fix the typo', M('default'));
   const sameOut = [];
@@ -1553,7 +1574,7 @@ section('M. round-robin commits only when a route is actually applied');
 
   // concurrent applied requests still rotate (selection+commit is synchronous)
   const hConc = makeCtx();
-  apply(hConc.ctx, cfg({ mode: 'managed', roles: { execution: { models: [M('A'), M('B'), M('C')], pick: 'round-robin' } } }));
+  apply(hConc.ctx, cfg({ mode: 'managed', pick: 'round-robin', roles: { execution: { models: [M('A'), M('B'), M('C')] } } }));
   const pConc = addParent(hConc.world, 'p-rr-conc', M('default'));
   const concKids = [];
   for (let i = 0; i < 6; i += 1) concKids.push(addChild(hConc.world, pConc, `rrconc0${i}-child`, 'fix the typo', M('default')));
@@ -1856,7 +1877,7 @@ section('O. live reload of a volatile-only Settings save (loader/volatile-update
   routeEq('O3b managed (after reload) overrides the same explicit choice', await hM.request(explicitBefore, M('CHOSEN')), PK, 'ROLE');
 
   // rotation state is engine-level and must survive a reload
-  const rawR = { roles: { execution: { models: [M('R1'), M('R2'), M('R3')], pick: 'round-robin' } }, strategy: { mode: 'managed' } };
+  const rawR = { pick: 'round-robin', roles: { execution: { models: [M('R1'), M('R2'), M('R3')] } }, strategy: { mode: 'managed' } };
   const hR = makeCtx();
   apply(hR.ctx, rawR);
   const pR = addParent(hR.world, 'p-rr-reload', M('PARENT'));

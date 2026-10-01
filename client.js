@@ -4,7 +4,8 @@
  * Contributes a configuration page for this plugin's own row on the Plugins
  * page. The row gains a configure control that opens a card with one model
  * picker per role (main / planning / execution / vision) fed by the host's live
- * model catalog, plus the distribution mode and a per-role reasoning effort.
+ * model catalog, plus the shared selection strategy, the distribution mode and
+ * a per-role reasoning effort.
  *
  * Design constraints (from the harness's own plugin practices):
  *   - No Harness Client package is `require`d as a module. React comes from the
@@ -99,6 +100,7 @@ window.__ModuleLoader__.load({
       pick: 'Selection',
       pickFirst: 'first — use the top model, fall back down the list',
       pickRoundRobin: 'round-robin — rotate across the list',
+      pickHint: 'One strategy for every role. "first" keeps each list as a failover chain; "round-robin" rotates across it.',
       orderHint: 'Order is the fallback order: the top model is tried first.',
       usageTitle: 'Model usage',
       usageModel: 'Provider / model',
@@ -148,6 +150,7 @@ window.__ModuleLoader__.load({
       pick: '选择方式',
       pickFirst: 'first — 优先用第一个，失败时按顺序向下回退',
       pickRoundRobin: 'round-robin — 在列表内轮流使用',
+      pickHint: '所有角色共用这一个选择方式。"first" 把每个角色的列表当作回退链；"round-robin" 在列表内轮流使用。',
       orderHint: '列表顺序即回退顺序：排在最前的模型优先使用。',
       usageTitle: '模型用量',
       usageModel: '提供方 / 模型',
@@ -231,7 +234,6 @@ window.__ModuleLoader__.load({
         color: 'var(--dsw-alias-label-secondary)',
       },
       cellSpan: { gridColumn: '2 / -1' },
-      pickLabel: { fontSize: '0.76rem', color: 'var(--dsw-alias-label-secondary)' },
       usage: { position: 'relative', display: 'inline-flex' },
       usageButton: {
         display: 'inline-flex',
@@ -540,6 +542,7 @@ window.__ModuleLoader__.load({
         const value = isObject(snapshot?.value) ? snapshot.value : {};
         const roles = isObject(value.roles) ? value.roles : {};
         const mode = isObject(value.strategy) && typeof value.strategy.mode === 'string' ? value.strategy.mode : 'hybrid';
+        const pick = value.pick === 'round-robin' ? 'round-robin' : 'first';
 
         const summary = () => {
           const parts = ROLES
@@ -710,26 +713,6 @@ window.__ModuleLoader__.load({
           h('option', { key: '', value: '' }, t('addModel')),
           ...modelOptions(used)));
 
-          if (models.length > 1) {
-            const holder = roles[role];
-            const pick = holder !== null && typeof holder === 'object' && holder.pick === 'round-robin'
-              ? 'round-robin' : 'first';
-            cells.push(h('span', {
-              key: 'pick',
-              style: { ...S.cellSpan, display: 'inline-flex', alignItems: 'center', gap: '0.45rem' },
-            },
-            h('span', { style: S.pickLabel }, t('pick')),
-            h('select', {
-              style: { ...S.selectGrid, ...S.selectEffortGrid },
-              value: pick,
-              disabled: !ready,
-              'aria-label': `${t(roleKeyFor(role))} — ${t('pick')}`,
-              onChange: (event) => write([{ op: 'set', path: ['roles', role, 'pick'], value: event.target.value }]),
-            },
-            h('option', { key: 'first', value: 'first' }, t('pickFirst')),
-            h('option', { key: 'rr', value: 'round-robin' }, t('pickRoundRobin')))));
-          }
-
           return h('div', { key: role, style: S.row },
             h('label', { style: S.label }, t(roleKeyFor(role))),
             h('span', { style: S.hint }, t(hintKeyFor(role))),
@@ -747,6 +730,22 @@ window.__ModuleLoader__.load({
               'aria-label': t('mode'),
               onChange: (event) => write([{ op: 'set', path: ['strategy', 'mode'], value: event.target.value }]),
             }, ...MODES.map((name) => h('option', { key: name, value: name }, t(modeKeyFor(name)))))));
+
+        // One selection strategy for every role (since 0.2.0): the value is
+        // top-level, and the per-role controls are gone by design.
+        const pickControl = h('div', { style: S.row },
+          h('label', { style: S.label }, t('pick')),
+          h('div', { style: S.controls },
+            h('select', {
+              style: S.select,
+              value: pick,
+              disabled: !ready,
+              'aria-label': t('pick'),
+              onChange: (event) => write([{ op: 'set', path: ['pick'], value: event.target.value }]),
+            },
+            h('option', { key: 'first', value: 'first' }, t('pickFirst')),
+            h('option', { key: 'rr', value: 'round-robin' }, t('pickRoundRobin')))),
+          h('span', { style: S.hint }, t('pickHint')));
 
         const notices = [];
         if (!ready && snapshot.status === 'ready') notices.push(h('div', { key: 'ro', style: S.notice }, t('readOnly')));
@@ -787,6 +786,7 @@ window.__ModuleLoader__.load({
           h('p', { style: S.help }, t('help')),
           enableToggle,
           ...ROLES.map((role) => row(role)),
+          pickControl,
           modeControl,
           ...notices);
       }

@@ -343,9 +343,10 @@ const flat = [];
 })(gridChildren);
 const cellNodes = (grids[0]?.children ?? []).flat(9).filter((c) => c !== null && typeof c === 'object');
 // Four cells per row (index, model, effort-or-placeholder, actions), plus the
-// add affordance and the pick line this role shows because it has two models.
+// add affordance. The per-role pick line is gone since 0.2.0: selection is one
+// top-level control, so a two-model role emits no extra grid child.
 layoutChecks.push(['every row emits all four cells, effort placeholder included',
-  cellNodes.length === 2 * 4 + 2, `cells ${cellNodes.length}`]);
+  cellNodes.length === 2 * 4 + 1, `cells ${cellNodes.length}`]);
 const modelSelects = flat.filter((n) => n.type === 'select' && String(n.props?.['aria-label'] ?? '').match(/Main \d$/));
 layoutChecks.push(['each model gets its own value select', modelSelects.length === 2, `found ${modelSelects.length}`]);
 const actionSpans = flat.filter((n) => n.props?.style?.display === 'inline-flex'
@@ -364,6 +365,17 @@ layoutChecks.push(['the add control is styled as an affordance, not a model row'
   JSON.stringify(addSelect?.props?.style ?? {})]);
 layoutChecks.push(['the add control spans the value columns',
   addSelect?.props?.style?.gridColumn === '2 / -1', addSelect?.props?.style?.gridColumn]);
+
+// 0.2.0: selection is ONE top-level control next to the mode control, and no
+// per-role pick control remains anywhere in the card.
+const pickSelects = nodes.filter((n) => n.type === 'select' && String(n.props?.['aria-label'] ?? '') === 'dsh-model-manager.pick');
+layoutChecks.push(['one shared selection control exists',
+  pickSelects.length === 1 && pickSelects[0]?.props?.value === 'first',
+  `found ${pickSelects.length}, value ${pickSelects[0]?.props?.value}`]);
+const perRolePick = nodes.filter((n) => n.type === 'select' && String(n.props?.['aria-label'] ?? '').endsWith('— dsh-model-manager.pick'));
+layoutChecks.push(['no per-role selection control remains', perRolePick.length === 0, `found ${perRolePick.length}`]);
+const pickHint = nodes.find((n) => n.type === 'span' && Array.isArray(n.children) && n.children.includes('dsh-model-manager.pickHint'));
+layoutChecks.push(['the shared selection control carries a hint', pickHint !== undefined, 'pickHint span']);
 
 for (const [label, ok, detail] of layoutChecks) {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`);

@@ -68,16 +68,18 @@ before handing it to pnpm. All four forms work:
 | `@darkbear9494/dsh-model-manager` | registry — the shortest one to type |
 | `github:jyshangguan/dsh-model-manager` | git — the `https://github.com/…` URL works too |
 | `/Users/you/src/dsh-model-manager` | absolute local directory (relative paths are refused) |
-| `/Users/you/darkbear9494-dsh-model-manager-0.1.0.tgz` | local tarball — `npm pack` makes one |
+| `/Users/you/darkbear9494-dsh-model-manager-0.2.0.tgz` | local tarball — `npm pack` makes one |
 
 Registering the plugin by name was verified end-to-end on this runtime: `dsh plugin --profile
-<name> add @darkbear9494/dsh-model-manager` resolves `^0.1.0` from the registry, `reconcile()`
+<name> add @darkbear9494/dsh-model-manager` resolves the current release (`^0.1.0` at first
+publish, `^0.2.0` since) from the registry, `reconcile()`
 appends the bundle, the composed tree mounts row `model-manager`, and a boot reaches the LLM stage
 with no peer refusal and no loader error. The git and local-path forms were checked the same way.
 
 ### The registry copy
 
-`@darkbear9494/dsh-model-manager@0.1.0` is published, public access, 8 files, 62.3 kB packed. Its
+`@darkbear9494/dsh-model-manager@0.2.0` is the current release, public access, 8 files, 63.1 kB
+packed (0.1.0, the first publish, was 62.3 kB with the same 8 files). Its
 declared gate is `>=0.1.7-rc.2 <0.3.0`, so it installs on the 0.2.0 line without an exemption.
 
 Two things learned while publishing it, in case a future version has to be released:
@@ -116,7 +118,7 @@ peer — only names equal to `@deepseek-ai/dsh` or beginning `@deepseek-ai/dsh-`
 command:
 
 ```bash
-dsh plugin --profile desktop allow-version @darkbear9494/dsh-model-manager@0.1.0 \
+dsh plugin --profile desktop allow-version @darkbear9494/dsh-model-manager@0.2.0 \
   --dsh-version <exact runtime version> --accept-risk
 ```
 
@@ -275,7 +277,9 @@ dsh --profile web --patch ./smoke.patch.yml headless "say ok"
 
 ## The four roles
 
-Each role holds an ordered list of routes and a `pick` strategy. A role with no models
+Each role holds an ordered list of routes. Since 0.2.0 the **selection strategy is one
+top-level `pick` for every role** — the per-role `pick` field of 0.1.x is gone, and a config
+that still carries it gets a warning naming the move. A role with no models
 resolves to no route, and requests classified into it pass through unchanged — except
 `vision`, which falls back to `execution`. A subagent never uses `main`.
 
@@ -286,16 +290,17 @@ resolves to no route, and requests classified into it pass through unchanged —
 | `execution` | Default tier for delegated implementation. | Every subagent that matches neither keyword list, including a child with an empty label; also the fallback for vision when `vision` has no models. | `pku-corpus/qwen3.8-flash` |
 | `vision` | Image, screenshot, chart and OCR work. | Subagents whose label matches a vision keyword. | `models: []` (falls back to `execution`) |
 
-A route is `{ provider, model, reasoningEffort? }`; `pick` is `first` (default) or
-`round-robin`. With one model in the list, `pick` has no effect. A role may also carry a
+A route is `{ provider, model, reasoningEffort? }`. The top-level `pick` is `first`
+(default) or `round-robin` and applies to every role alike; with one model in a role's list
+it has no effect for that role. A role may also carry a
 `note` — free text for humans, printed under the role in the `routes` table and never
 used for routing.
 
 ## Configure in the UI
 
 The client half contributes a configuration card to the Plugins page. It writes exactly the
-values documented under [Configuration](#configuration) — `roles.<role>.models` and
-`strategy.mode` — so the two paths are interchangeable: use the card to try a routing
+values documented under [Configuration](#configuration) — `roles.<role>.models`, the
+top-level `pick` and `strategy.mode` — so the two paths are interchangeable: use the card to try a routing
 choice, the YAML to pin it. This package's own `cordis.patch.yml` is the declarative source
 that ships with the bundle and is re-read on every boot, and a profile patch overrides it by
 row id; the card never edits patch files, so if a patch layer pins a value, edit the patch.
@@ -306,7 +311,7 @@ row id; the card never edits patch files, so if a patch layer pins a value, edit
 
 | Slot | Registration id | What it renders |
 | --- | --- | --- |
-| `settings.section` | `model-manager` | The configuration card: the four roles and their model lists, the pick strategy, the distribution mode. |
+| `settings.section` | `model-manager` | The configuration card: the four roles and their model lists, the shared selection strategy, the distribution mode. |
 | `conversation.session.header.utilities` | `model-manager-usage` | The per-session model-usage summary the host half folds from the durable log. |
 
 So the path is **设置 → 模型管理器** — not Plugins → the row → configure. `plugins.item` and
@@ -331,12 +336,11 @@ polling on the client, and the numbers survive a restart.
 | Model rows, one per role (`Main model`, `Planning and reasoning`, `Execution`, `Image recognition`) | `set roles.<role>.models` | Each configured route is its own row with a `<select>` grouped by provider in `<optgroup>`s, fed by `ctx.remote.session.modelCatalog()` and labelled `name — id`. A route the catalog stopped advertising stays selectable and is marked `(not in catalog)` rather than being silently swapped. An empty list is the YAML default: no route for that role, and `vision` falls back to `execution`. |
 | Add a model | `set roles.<role>.models` | One dashed control under the rows, listing every catalog model the role has not already used, so a model cannot be added twice. |
 | `up` / `remove` | `set roles.<role>.models` | Reorder and delete. The whole list is rewritten in one atomic operation, so a reorder cannot interleave into a partial state. The up control is **disabled on the first row** rather than absent, so the column never changes width. |
- `reasoning.efforts`** in the catalog. `(model default)` writes a route with no `reasoningEffort`, letting the adapter choose; naming a tier explicitly is how you satisfy a model that rejects a request without one. |
 | Reasoning-effort picker | `set roles.<role>.models` (single route with `reasoningEffort`) | Appears **only when the selected model advertises `reasoning.efforts`** in the catalog. `(model default)` writes a route with no `reasoningEffort`, letting the adapter choose; naming a tier explicitly is how you satisfy a model that rejects a request without one. |
-| `Pick` (`first` / `round-robin`) | `set roles.<role>.pick` | Shown for a role holding two or more models. `first` always uses index 0 and only advances when a route fails; `round-robin` spreads consecutive requests. |
+| `Pick` (`first` / `round-robin`) | `set pick` | **One control for every role** (since 0.2.0), rendered next to the distribution mode with a hint line. `first` always uses index 0 of each role's list and only advances when a route fails; `round-robin` spreads consecutive requests across each role's list. |
 | Distribution mode | `set strategy.mode` | `hybrid` / `managed` / `advisory`, labelled with the same one-line explanations this README uses. A stored mode the card does not know displays as `hybrid`, mirroring the host half's fallback. |
 
-**Layout.** One CSS grid per role, with fixed column tracks `auto minmax(0, 1fr) auto auto` — index, model, effort, actions. That choice is the whole reason the rows line up: in a flex row a control with `flex: 1 1 16rem` takes width from its siblings, so any row that omits one control (a model with no reasoning tiers, a first row with no reorder button) pulls every other row's right edge out of alignment. Under the grid a row with no effort control still emits an empty cell, so the action column sits at the same x everywhere. The two actions are glyphs rather than words, so the column is also the same width in either locale; each keeps an `aria-label` and a native `title`. The add affordance is deliberately unlike a model row — dashed border, no fill, muted text, spanning the value columns — and the pick line uses its own label style instead of the numeric index style.
+**Layout.** One CSS grid per role, with fixed column tracks `auto minmax(0, 1fr) auto auto` — index, model, effort, actions. That choice is the whole reason the rows line up: in a flex row a control with `flex: 1 1 16rem` takes width from its siblings, so any row that omits one control (a model with no reasoning tiers, a first row with no reorder button) pulls every other row's right edge out of alignment. Under the grid a row with no effort control still emits an empty cell, so the action column sits at the same x everywhere. The two actions are glyphs rather than words, so the column is also the same width in either locale; each keeps an `aria-label` and a native `title`. The add affordance is deliberately unlike a model row — dashed border, no fill, muted text, spanning the value columns.
 
 Each role also carries a hint line (`Top-level agent outside plan mode. Leave unset to keep
 following the composer selection.`, `Used for image, screenshot and OCR work. Pick a model
@@ -530,8 +534,8 @@ is active and `main` otherwise.
 
 If `vision.models` is empty when a vision request is routed, the plugin serves it from the
 execution role's models instead. The role recorded for that request is still `vision`;
-the model is the execution role's, and `execution`'s `pick` strategy and `round-robin`
-counter are the ones used. The `routes` table marks such a role `(via execution)`. If
+the model is the execution role's, and the shared `pick` strategy with the execution
+role's `round-robin` counter are the ones used. The `routes` table marks such a role `(via execution)`. If
 `execution` is empty as well, there is no route and the request passes through. This is
 why the bundled default (`vision: []`) is safe: vision work is served by the execution
 tier until you configure a dedicated vision model.
@@ -611,7 +615,7 @@ re-reads the config itself — including rebuilding the keyword matchers. A keyw
 change saved on the Settings page — or from the [card on the Plugins
 page](#configure-in-the-ui), which writes the same volatile namespace — takes effect on the
 next request, with no restart. The
-event logs `settings reloaded — mode …` on success; a value that cannot be re-read logs
+event logs `settings reloaded — mode …, pick …` on success; a value that cannot be re-read logs
 `could not reload settings; routing keeps the previous config: …` and the previously
 active config stays in force.
 
@@ -620,20 +624,17 @@ Complete key set, with the schema defaults shown in comments:
 ```yaml
 - id: model-manager
   config:
+    pick: first               # default: first; "first" | "round-robin" — ONE strategy for every role
     roles:
       main:
         models: []            # default: [] — empty means "leave the composer/model selection alone"
-        pick: first           # default: first; "first" | "round-robin"
         note: ''              # default: none — optional free text, printed by `routes` under the role
       planning:
         models: []            # schema default: [] (this package's own layer sets pku-corpus/qwen3.8-max-0902)
-        pick: first
       execution:
         models: []            # schema default: [] (this package's own layer sets pku-corpus/qwen3.8-flash)
-        pick: first
       vision:
         models: []            # schema default: [] — empty falls back to the execution role
-        pick: first
     strategy:
       mode: hybrid            # default: hybrid; "hybrid" | "managed" | "advisory"
       # visionKeywords: omitted = the 20 built-ins; any list you write replaces them
@@ -746,7 +747,7 @@ The plugin registers one read-only tool, `model_manager`, with four actions:
 | Action | Returns |
 | --- | --- |
 | `report` (default) | A `Top-level agents` table — session id, role, model, reason, live status, and whether the session's model was picked by hand or left at the deployment default — then the per-subagent table: child id, role, model, reason, live status, delegation label, and finally the active mode with subagent-only totals by role/model. |
-| `routes` | Role table (role, `pick`, effective models, role `note`), active mode, allow-list audit with a YAML snippet for unlisted routes, the vision image-capability check, and the first 8 keywords of each list. |
+| `routes` | Role table (role, effective models, role `note`), the shared selection strategy, active mode, allow-list audit with a YAML snippet for unlisted routes, the vision image-capability check, and the first 8 keywords of each list. |
 | `usage` | Request and subagent counts per role/model across the whole process, including top-level turns. |
 | `client` | Whether the Host composed this package's Web client half into the browser boot graph, the route serving its bundle, and the current graph revision. Use it when the settings card does not appear. |
 
@@ -885,13 +886,17 @@ model_manager(action: "routes")
 ```text
 Model manager roles
 
-Role          pick          effective model(s)
-------------  ------------  ------------------------------------------
-main          first         (unconfigured — passes through)
-planning      first         pku-corpus/qwen3.8-max-0902
-                            note: use for architecture and migration design
-execution     first         pku-corpus/qwen3.8-flash
-vision        first         pku-corpus/kimi-k3, pku-corpus/qwen3.8-flash, pku-corpus/mystery, pku-corpus/broken
+Enabled: yes
+
+Selection: first — every role starts at its top model and fails over down its list (one strategy for all roles)
+
+Role          effective model(s)
+----------  ------------------------------------------
+main         (unconfigured — passes through)
+planning     pku-corpus/qwen3.8-max-0902
+              note: use for architecture and migration design
+execution    pku-corpus/qwen3.8-flash
+vision       pku-corpus/kimi-k3, pku-corpus/qwen3.8-flash, pku-corpus/mystery, pku-corpus/broken
 
 Strategy mode: hybrid (apply when the child inherited the parent route)
 
@@ -1138,9 +1143,9 @@ of writing. Each suite also runs on its own: `node test/<name>.test.mjs`.
 | --- | --- | --- |
 | `packaging.test.mjs` | 31 | The package identity that nothing else cross-checks: the scoped name is the one string the bundle patch's loader row, the client half's module id and the host half's `PACKAGE_NAME` must all agree on, while the cordis row id, the client row namespace and the locale namespace must all *stay* unscoped. Plus publishability (not private, public access, a real `@deepseek-ai/dsh` version gate, schemastery still optional) and tarball completeness — every `exports` target and every `files` pattern resolved against disk, so a published package cannot mount-less. The gate is not string-matched: a self-validating semver comparator (prerelease-aware, and checked against the ordering trap first) proves the declared range admits 0.1.7-rc.2, 0.2.0-rc.2 **and** 0.2.0 while refusing 0.1.6 and 0.3.0 — because `<0.2.0` reads as "every 0.2.0 prerelease" while excluding 0.2.0 itself. Each identity assertion was mutation-checked: breaking any one of the four name sites, or "tidying" the row id or locale namespace to match, fails exactly one assertion; reverting the upper bound to `<0.2.0` fails exactly two. |
 | `routing.test.mjs` | 9 | The four roles route as documented; label classification; an explicit child route is respected; the tool and system-prompt section register; `apply` survives malformed configs. |
-| `edge.test.mjs` | 503 | Hostile configs, keyword anchoring and trimming, explicit-`[]`-disables versus absent-uses-defaults, round-robin committing only on apply, LRU eviction, the manager-owned rule, volatile settings reload, every `reason` string, the report/usage/routes output, and the generated allow-list YAML round-tripped through the **real** harness validator. |
+| `edge.test.mjs` | 553 | Hostile configs, keyword anchoring and trimming, explicit-`[]`-disables versus absent-uses-defaults, the 0.2.0 pick migration (legacy per-role values warn and are ignored; the top-level value normalizes), round-robin committing only on apply, LRU eviction, the manager-owned rule, volatile settings reload, every `reason` string, the report/usage/routes output, and the generated allow-list YAML round-tripped through the **real** harness validator. |
 | `failover.test.mjs` | 24 | The failover chain and every guard: it walks to the end of the list and then stops rather than wrapping; `ABORTED`, `INVALID_REQUEST` and `IMAGE_OFFLOAD_REQUIRED` never fail over; a downstream recovery decision is passed through untouched; the per-step cap holds and resets on a new step; `round-robin` does wrap; single-model and disabled roles do nothing; a route outside the role's list is left alone; hostile payloads never throw; subagent chains fail over too. |
-| `client-structure.test.mjs` | 32 | The client half loads through `window.__ModuleLoader__`, requires **only** `react`, exports `{ inject, apply }`, registers its locale dictionaries and exactly two surfaces, and — because the check mirrors the real `SlotCore.register` validation — fails if a registration ever loses its `name`. It also declares each `remote.<namespace>` used must appear in `inject`, drives the settings-form bindings, and renders the usage surface against a stubbed projection face in both its collapsed and expanded states, with an empty-projection case proving those render assertions are not vacuous. |
+| `client-structure.test.mjs` | 35 | The client half loads through `window.__ModuleLoader__`, requires **only** `react`, exports `{ inject, apply }`, registers its locale dictionaries and exactly two surfaces, and — because the check mirrors the real `SlotCore.register` validation — fails if a registration ever loses its `name`. It also declares each `remote.<namespace>` used must appear in `inject`, drives the settings-form bindings, renders the usage surface against a stubbed projection face in both its collapsed and expanded states (an empty-projection case proving those render assertions are not vacuous), and pins the 0.2.0 card shape: exactly one shared selection control writing the top-level `pick`, with no per-role pick control left anywhere in the tree. |
 | `client-diagnostic.test.mjs` | 17 | Every branch of `model_manager` with `action: "client"`, including the two that matter most: a bundle the Host will not serve, and a bundle that serves but registers the wrong id. |
 | `usage-projection.test.mjs` | 42 | The per-session model-usage fold: bucket sums against the harness's own field names, refusal of unsafe or fractional counts without aborting the fold, usage recovered from an embedded stream, separate attribution per provider/model, immutable state transitions, reference stability that suppresses republishing, and both schemas rejecting junk through the only method cordis calls (`.parse`). |
 | `explicit-selection.test.mjs` | 25 | The rule that `main` yields to a hand-picked session model, and nothing else does: respected under `hybrid`, still applied under `managed`, untouched by a respected call in the round-robin rotation, and falling back to the old rewriting behaviour when the projection service is absent, when `stateOf` throws, or when the key was never registered. A disabled manager is checked too. Plus the `Top-level agents` report table: the hand-picked versus default-driven verdict, no orphaned subagent header when no subagent exists, a row that outlives its agent degrading to `unknown, agent no longer live`, and — read back out of the renderer's own source — proof that the reason column is still padded past the longest reason string it can print. |
@@ -1182,7 +1187,9 @@ outside the repository.
   keeps being managed as long as its route matches the applied one, even after its parent
   is gone. If a child legitimately changes its own model to one the parent also uses, the
   manager takes it back.
-- **`round-robin` is per-process and per-role.** Counters live in an in-memory `Map` and
+- **`round-robin` is per-process; the strategy itself is global.** The pick strategy is one
+  top-level value shared by every role, but the rotation counters are per-role, live in an
+  in-memory `Map` and
   reset to index 0 on restart. A role with a single model never advances, and an advance is
   committed only when a route is applied, so `advisory` passes and both kinds of respected
   route do not rotate. Routing happens per LLM request, not per turn, so a `round-robin`

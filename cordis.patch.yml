@@ -15,6 +15,10 @@
     - id: model-manager
       name: '@darkbear9494/dsh-model-manager'
       config:
+        # One selection strategy for every role (0.2.0): first | round-robin.
+        # `first` treats each role's ordered list as a failover chain;
+        # `round-robin` rotates across each role's list.
+        pick: first
         roles:
           # Main agent outside plan mode. Empty = leave the composer choice alone.
           main:

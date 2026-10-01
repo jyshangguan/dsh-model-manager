@@ -87,9 +87,10 @@ const COMPOSER = { provider: 'user-picked', model: 'session-choice' };
 const MAIN = { provider: 'mgr', model: 'main-0' };
 const CONFIG = (mode) => ({
   enabled: true,
+  pick: 'round-robin',
   strategy: { mode },
   roles: {
-    main: { models: [MAIN, { provider: 'mgr', model: 'main-1' }], pick: 'round-robin' },
+    main: { models: [MAIN, { provider: 'mgr', model: 'main-1' }] },
     planning: { models: [] }, execution: { models: [] }, vision: { models: [] },
   },
 });
