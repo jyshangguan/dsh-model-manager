@@ -3,7 +3,11 @@
 A host-half plugin for DeepSeek Harness that assigns models to four roles — `main`,
 `planning`, `execution`, `vision` — applies them on the `agent/request` waterfall, and
 reports which model every subagent actually used, with its role, the reason, and its live
-status.
+status. Since 0.3.0 it also **prompts the top-level agent to delegate** (`strategy.autoDelegate`)
+and **checks npm for a newer release of itself** (`update`), surfacing an upgrade notice in the
+log, through the `model_manager` tool, on the settings card, and as a chip in the session header.
+Since 0.4.0 the delegation label is a contract, not a hint: a leading `plan:`/`vision:` prefix
+decides the tier outright, and each role's failover chain wears down on its own.
 
 ## What it is
 
@@ -16,7 +20,17 @@ nothing tells you afterwards which model a given subagent ended up on.
 This plugin is that layer. It keeps one ordered route list per role, classifies each
 delegated child from the label the delegating agent gives it, rewrites the child's resolved
 route to the role's route when inheritance is provable, and exposes a read-only
-`model_manager` tool that reports what happened. It is deliberately small: one ESM host
+`model_manager` tool that reports what happened. 0.3.0 adds two layers on top of routing
+proper: an **auto-delegation policy** — a system-prompt section that teaches the top-level
+agent to plan and dispatch subagents instead of doing everything itself, which is the
+behaviour the harness's own instructions only nudge at — and an **update check** that
+compares the installed version with the registry's `dist-tags.latest` and tells you how to
+upgrade. 0.4.0 makes the label a contract instead of a hint: a leading `plan:`/`vision:`
+prefix decides the tier before any keyword is consulted, the policy never advertises a tier
+with no models behind it, it teaches the delegating agent to leave `provider`/`model` unset
+on tiered units (an explicitly named route overrides the tier under `hybrid`), and the
+failover cursor is tracked per (session, role) so one tier's wear never pushes another tier
+off its first model. It is still deliberately small: one ESM host
 file, one config schema, and one hand-written client file that contributes a
 configuration card to the Plugins page. There is no build step for either half.
 
@@ -68,19 +82,23 @@ before handing it to pnpm. All four forms work:
 | `@darkbear9494/dsh-model-manager` | registry — the shortest one to type |
 | `github:jyshangguan/dsh-model-manager` | git — the `https://github.com/…` URL works too |
 | `/Users/you/src/dsh-model-manager` | absolute local directory (relative paths are refused) |
-| `/Users/you/darkbear9494-dsh-model-manager-0.2.0.tgz` | local tarball — `npm pack` makes one |
+| `/Users/you/darkbear9494-dsh-model-manager-0.2.0.tgz` | local tarball — `npm pack` makes one (0.3.0's would be named the same way) |
 
 Registering the plugin by name was verified end-to-end on this runtime: `dsh plugin --profile
 <name> add @darkbear9494/dsh-model-manager` resolves the current release (`^0.1.0` at first
 publish, `^0.2.0` since) from the registry, `reconcile()`
 appends the bundle, the composed tree mounts row `model-manager`, and a boot reaches the LLM stage
 with no peer refusal and no loader error. The git and local-path forms were checked the same way.
+The same add command is the **upgrade** path: re-running it with `@latest` resolves the newer
+version and updates the dependency in place.
 
 ### The registry copy
 
-`@darkbear9494/dsh-model-manager@0.2.0` is the current release, public access, 8 files, 63.1 kB
-packed (0.1.0, the first publish, was 62.3 kB with the same 8 files). Its
-declared gate is `>=0.1.7-rc.2 <0.3.0`, so it installs on the 0.2.0 line without an exemption.
+`@darkbear9494/dsh-model-manager@0.4.0` is the current release, public access, the same 8
+files as 0.2.0 (the tarball grew, not the file list: the host half, the client half and this
+README carry the new sections). 0.2.0 packed 63.1 kB with the same 8 files, and 0.1.0, the
+first publish, 62.3 kB. The declared gate is `>=0.1.7-rc.2 <0.3.0`, so every release on the
+0.1.7–0.2.x runtime lines installs without an exemption.
 
 Two things learned while publishing it, in case a future version has to be released:
 
@@ -292,7 +310,11 @@ resolves to no route, and requests classified into it pass through unchanged —
 
 A route is `{ provider, model, reasoningEffort? }`. The top-level `pick` is `first`
 (default) or `round-robin` and applies to every role alike; with one model in a role's list
-it has no effect for that role. A role may also carry a
+it has no effect for that role. Under `first` the list is a failover chain, and since 0.4.0
+the wear position is tracked per **(session, role)**, not per session: a session that failed
+over while it was serving `planning` (plan mode moves one session between `main` and
+`planning` on every request) comes back to `main` still on `main`'s first model. A role may
+also carry a
 `note` — free text for humans, printed under the role in the `routes` table and never
 used for routing.
 
@@ -300,25 +322,27 @@ used for routing.
 
 The client half contributes a configuration card to the Plugins page. It writes exactly the
 values documented under [Configuration](#configuration) — `roles.<role>.models`, the
-top-level `pick` and `strategy.mode` — so the two paths are interchangeable: use the card to try a routing
+top-level `pick`, `strategy.mode` and `strategy.autoDelegate` — so the two paths are
+interchangeable: use the card to try a routing
 choice, the YAML to pin it. This package's own `cordis.patch.yml` is the declarative source
 that ships with the bundle and is re-read on every boot, and a profile patch overrides it by
 row id; the card never edits patch files, so if a patch layer pins a value, edit the patch.
 
 ### Where the card appears
 
-`client.js` registers **two** surfaces and deliberately nothing on the Plugins page:
+`client.js` registers **three** surfaces and deliberately nothing on the Plugins page:
 
 | Slot | Registration id | What it renders |
 | --- | --- | --- |
-| `settings.section` | `model-manager` | The configuration card: the four roles and their model lists, the shared selection strategy, the distribution mode. |
+| `settings.section` | `model-manager` | The configuration card: the four roles and their model lists, the shared selection strategy, the auto-delegation level, the distribution mode, and the update banner. |
 | `conversation.session.header.utilities` | `model-manager-usage` | The per-session model-usage summary the host half folds from the durable log. |
+| `conversation.session.header.utilities` | `model-manager-update` | The update-available chip (0.3.0): renders nothing unless a newer release was found, then shows `更新：<latest>` and discloses the upgrade command on click. |
 
 So the path is **设置 → 模型管理器** — not Plugins → the row → configure. `plugins.item` and
 `plugins.row.config` are *not* registered: one card in one place was the requirement, and a
 second copy on the Plugins page would only be a second place for the same values to disagree.
 
-Both entries are registered **unconditionally** rather than behind the shipped
+All entries are registered **unconditionally** rather than behind the shipped
 `configForms.whileServed([ns], …)` gate. The Host serves a settings namespace only for a row
 whose Config schema has volatile fields, so that gate would hide the card entirely whenever the
 optional schemastery dependency failed to resolve — making a packaging problem look exactly like
@@ -338,7 +362,9 @@ polling on the client, and the numbers survive a restart.
 | `up` / `remove` | `set roles.<role>.models` | Reorder and delete. The whole list is rewritten in one atomic operation, so a reorder cannot interleave into a partial state. The up control is **disabled on the first row** rather than absent, so the column never changes width. |
 | Reasoning-effort picker | `set roles.<role>.models` (single route with `reasoningEffort`) | Appears **only when the selected model advertises `reasoning.efforts`** in the catalog. `(model default)` writes a route with no `reasoningEffort`, letting the adapter choose; naming a tier explicitly is how you satisfy a model that rejects a request without one. |
 | `Pick` (`first` / `round-robin`) | `set pick` | **One control for every role** (since 0.2.0), rendered next to the distribution mode with a hint line. `first` always uses index 0 of each role's list and only advances when a route fails; `round-robin` spreads consecutive requests across each role's list. |
+| `Auto delegation` (`off` / `balanced` / `eager`) | `set strategy.autoDelegate` | New in 0.3.0. The [delegation policy](#auto-delegation-policy-strategyautodelegate) level, labelled with one-line explanations. A stored level the card does not know displays as `balanced`, mirroring the host half's fallback. |
 | Distribution mode | `set strategy.mode` | `hybrid` / `managed` / `advisory`, labelled with the same one-line explanations this README uses. A stored mode the card does not know displays as `hybrid`, mirroring the host half's fallback. |
+| Update banner (read-only) | — | New in 0.3.0. When the client-side update store says a newer release exists, a warn-toned banner opens the card: versions, the upgrade command, and a **Re-check** button. See [Automatic update checks](#automatic-update-checks). |
 
 **Layout.** One CSS grid per role, with fixed column tracks `auto minmax(0, 1fr) auto auto` — index, model, effort, actions. That choice is the whole reason the rows line up: in a flex row a control with `flex: 1 1 16rem` takes width from its siblings, so any row that omits one control (a model with no reasoning tiers, a first row with no reorder button) pulls every other row's right edge out of alignment. Under the grid a row with no effort control still emits an empty cell, so the action column sits at the same x everywhere. The two actions are glyphs rather than words, so the column is also the same width in either locale; each keeps an `aria-label` and a native `title`. The add affordance is deliberately unlike a model row — dashed border, no fill, muted text, spanning the value columns.
 
@@ -422,9 +448,11 @@ the patch layer.
 **Verification status, stated honestly:** the client half was verified by JavaScript syntax,
 manifest validation, a structural load of the `window.__ModuleLoader__.load` factory — which
 confirms that only `react` is required, that `apply` registers the `dsh-model-manager` locale
-namespace with the same 46 keys in English and Chinese (the test compares the sorted key *sets*,
-not just their counts), that exactly two surfaces are injected — `settings.section` under
-`model-manager` and `conversation.session.header.utilities` under `model-manager-usage` — and
+namespace with the same 61 keys in English and Chinese (the test compares the sorted key *sets*,
+not just their counts), that exactly three registrations land across the two surfaces —
+`settings.section` under `model-manager` and `conversation.session.header.utilities` under
+`model-manager-usage` (the per-session usage) plus `model-manager-update` (the update chip,
+which renders `null` while the update store is idle) — and
 that `apply` still returns normally when every injected collaborator throws. It was also checked
 against the live slot contract in `@deepseek-ai/dsh-client-ui-settings`. **Visual verification of
 the rendered card is not available in this environment:** the harness's own verification guidance
@@ -509,15 +537,20 @@ unresolved-lineage route all leave the rotation where it was.
 
 Only a session whose `session.header.origin` is `'subagent'` is classified by label. The
 label is the `description` the delegating agent passed to the `subagent` tool, which the
-harness stores as the child's label. Matching is case-insensitive and anchored at a
-leading word boundary, in this order:
+harness stores as the child's label. Matching is case-insensitive, anchored at a leading
+word boundary, and prefix-first, in this order:
 
 1. Empty label → `execution`.
-2. Any `visionKeywords` match → `vision`.
-3. Else any `planningKeywords` match → `planning`.
-4. Else `execution`.
+2. A label starting with `plan:` (case-insensitive, leading whitespace ignored) →
+   `planning`.
+3. A label starting with `vision:` → `vision`.
+4. Else any `visionKeywords` match → `vision`.
+5. Else any `planningKeywords` match → `planning`.
+6. Else `execution`.
 
-Vision is tested before planning, so a label that matches both lands on `vision`.
+The leading prefix is authoritative — it is the one part of the label the delegating model
+writes *on purpose*, so `"plan: analyse the screenshots"` is planning work. Among keyword
+matches, vision is tested before planning, so a label matching both lands on `vision`.
 
 | Delegation `description` | Matched by | Role | Applied route (bundled defaults) |
 | --- | --- | --- | --- |
@@ -599,6 +632,128 @@ warn  [model-manager] vision role route(s) declare no image input and image work
 undeclared modalities may well accept images, and an unresolvable route is already reported
 by the allow-list audit.
 
+## Auto-delegation policy (`strategy.autoDelegate`)
+
+**The problem it solves.** The harness gives the top-level agent a `subagent` tool and a
+one-line nudge ("Start independent delegations together in one message"), but nothing tells
+it *when* to delegate. In practice the model does the work itself and only reaches for a
+delegation when it cannot proceed — image reading being the canonical case. This plugin is
+already in the business of routing delegations by role; 0.3.0 makes it also *ask* for them.
+
+`strategy.autoDelegate` controls a second system-prompt section, `model-manager:delegation`
+(order 550 — next to the harness's own `PLAN_POLICY`/`TEAM_POLICY` rows, not next to the
+routing cheat sheet, because this is a behavioural policy rather than a routing fact):
+
+| Level | Rendered for | What it tells the top-level agent |
+| --- | --- | --- |
+| `off` | nobody | Nothing — no section text at all. |
+| `balanced` (default) | the orchestrating top-level agent | Default to solving substantive work through subagents: delegate the decomposition itself as a `plan:` unit, dispatch the units it returned together in one message, keep coordination / trivial edits / user-facing decisions / final synthesis for yourself, verify what comes back. |
+| `eager` | the orchestrating top-level agent | You are the orchestrator: nearly all substantive work — research, analysis, implementation, review, verification — belongs in delegations, the decomposition itself going out as a `plan:` unit first; do work yourself only when no delegation can carry it. |
+
+Both levels end with the same labelling block, so the policy and the role tiers are used
+together — which is the point of having both in one plugin. The block labels each delegation
+by the *kind of work it carries* (`plan:` = must be thought through, `vision:` = reads images,
+plain = mechanical execution), states that a leading prefix decides the tier with keyword
+matching as the fallback, and — under any mode that actually routes — tells the agent to
+**omit `provider` and `model` on `plan:`/`vision:` units**, because a route named explicitly
+on the delegation overrides the tier. That last line is the one that makes the label matter
+under `hybrid`, where a respected explicit choice is exactly what defeats role routing.
+
+**Rendering is per assembly, and deliberately narrow.** The section's text function receives
+the assembly context (`{ agent, scope }`, the same object `dsh-agent`'s
+`assembleContextFor` builds) and returns `''` — no policy at all — unless every gate passes:
+
+- the manager is enabled and the level is not `off`;
+- the assembly is **not** a delegated child: `session.header.origin === 'subagent'` or
+  `header.delegationDepth > 0` both disqualify. Children already carry the harness's fixed
+  `subagent:delegation` runtime context, and encouraging a child to re-delegate would push
+  every unit one depth level down for no benefit;
+- the assembly's scope **actually exposes a delegation tool**, checked with
+  `tools.get('subagent', scope)` / `tools.get('subagent_fork', scope)` — the same probe
+  `dsh-tool-subagent`'s own prompt section uses. An agent whose composition restricted the
+  delegation tools never sees a policy naming a tool it cannot call, and a harness that
+  renames the tool loses the policy rather than rendering a broken instruction.
+
+Beyond the gates, the labelling block adapts to what is actually behind it: a tier with no
+configured models is never advertised (no `plan:` line when the planning role is empty — and
+the balanced "plan first" bullet loses its label too), and under `advisory`, where nothing is
+routed at all, the omit-`provider`/`model` line is dropped because it would warn about
+nothing.
+
+Only the tools that resolve are named: with both present the policy mentions `subagent` and
+the `subagent_fork` preference for work that needs this conversation's context; with only
+`subagent` the fork line is dropped. `model_manager(action: "routes")` reports the level
+(`Auto-delegation: balanced — …`), and the settings card offers the three-way select, so
+switching levels needs no restart — the section reads the live config, so a saved edit
+applies to the next request.
+
+## Automatic update checks
+
+The host half checks whether a newer `@darkbear9494/dsh-model-manager` is published, and
+tells you — passively in the log, on demand through the tool, and persistently in the Web UI.
+
+**How it works.** The plugin reads its own version from its `package.json` (so a git
+checkout, an npm install and a tarball install all report what actually shipped), fetches
+the abbreviated packument `<registry>/@darkbear9494%2fdsh-model-manager` with
+`Accept: application/vnd.npm.install-v1+json`, reads `dist-tags.latest`, and compares the
+two with a semver comparator that handles prereleases (`0.3.1-rc.1 < 0.3.1`, numeric
+prerelease identifiers compare numerically). The first check runs ~10 s after boot — never
+on the boot path — and then once per `intervalHours`; every failure path (no network,
+CORS, a malformed packument) lands in a logged diagnostic and a `CHECK FAILED` verdict,
+never a throw, and never touches routing.
+
+**Where a newer release is surfaced:**
+
+| Surface | What you see |
+| --- | --- |
+| Host log | `warn  [model-manager] update available: @darkbear9494/dsh-model-manager 0.2.0 -> 0.3.0 (checked https://registry.npmjs.org). Run the model_manager tool with action "update" for the upgrade command, then restart.` |
+| `model_manager` action `update` | The full report below — including the paste-ready upgrade command with the live profile name. |
+| `report` / `routes` | One status line each (`Update check: 0.3.0 AVAILABLE (installed 0.2.0, …)`); `routes` always carries the line, `report` only when an update exists. |
+| Settings card | A warn-toned banner at the top of the card with the versions, the upgrade command, and a **Re-check** button. |
+| Session header | A small `更新：0.3.0` chip next to the usage button; clicking it discloses the upgrade command. It disappears when the store says up to date. |
+
+Asking for the check directly:
+
+```text
+model_manager(action: "update")
+```
+
+```text
+Model manager update check
+
+  installed : 0.2.0
+  latest    : 0.3.0
+  registry  : https://registry.npmjs.org
+  checked   : 2026-10-07T03:12:44.612Z
+  verdict   : UPDATE AVAILABLE (0.2.0 -> 0.3.0)
+
+To upgrade, run in a terminal:
+
+  dsh plugin --profile desktop add @darkbear9494/dsh-model-manager@latest
+
+then restart the harness so the new version mounts. The Plugins page can reinstall
+the same package instead; both paths run the same installer. Tell the user this
+upgrade is available and what command to run.
+```
+
+The `<profile>` in the command is read from the host's working directory
+(`$DSH_HOME/profiles/<name>`); when the layout does not match, the command prints
+`<profile>` as a placeholder. Upgrading is re-running the add command — the installer
+(`dsh plugin add` / the GUI's `install_bundle`) resolves the new version, updates the
+dependency and keeps the bundle registration; restart the harness afterwards so the new
+host half mounts.
+
+**The browser half runs the same comparison itself.** The Web client cannot read the host's
+in-memory state, so `client.js` pins the version it shipped with (a packaging test pins
+that constant equal to `package.json`) and fetches the same packument once per page load —
+plus on every `settings/document-updated` (the registry URL is row config, so a change
+re-checks) and on the banner's Re-check button. That is why the chip and banner can appear
+the moment the GUI opens. An offline or registry-blocked deployment simply sees no banner;
+the host log and the tool action still report the update. This also means the browser makes
+one cross-origin `fetch` to the configured registry — `registry.npmjs.org` (and npmmirror)
+answer it with `Access-Control-Allow-Origin: *`; a registry that does not is silently
+unusable for the client half and only the host surfaces remain.
+
 ## Configuration
 
 Config is the `config` of the row id `model-manager`. This bundle ships a layer that
@@ -640,11 +795,27 @@ Complete key set, with the schema defaults shown in comments:
       # visionKeywords: omitted = the 20 built-ins; any list you write replaces them
       # planningKeywords: omitted = the 24 built-ins; [] DISABLES that classifier
       historyLimit: 300       # default: 300; any positive value floors to at least 1
+      autoDelegate: balanced  # default: balanced; "off" | "balanced" | "eager" — the delegation policy
+    update:                   # 0.3.0 — automatic update check
+      enabled: true           # default: true; only an explicit false stops the checks
+      registry: https://registry.npmjs.org   # any npm-compatible registry (npmmirror works)
+      intervalHours: 24       # default: 24; explicit 0 = check at boot only
 ```
 
 The two keyword lists are shown commented out because their default is the built-in list
 rather than a literal value: omitting the key keeps the built-ins, while writing any list —
 including `[]` — replaces them, and `[]` switches that classifier off entirely.
+
+Behaviours of the `update` block worth knowing:
+
+- `registry` must be an `http(s)` origin; anything else (or a non-string) falls back to
+  `https://registry.npmjs.org`. Trailing slashes are trimmed.
+- `intervalHours` accepts a fraction (0.5 = 30 min, useful when watching a release land)
+  and is floored at one minute so a mis-typed hour cannot hammer a registry. An absent,
+  malformed or negative value means the 24 h default; an explicit `0` means "check at boot
+  only". `enabled: false` is the actual off switch.
+- A settings save that changes the update block re-arms the schedule **and** runs one
+  immediate check, so switching to a mirror registry takes effect without a restart.
 
 Each entry of `models` is:
 
@@ -697,6 +868,11 @@ The bundled layer this package ships is:
             models: []
         strategy:
           mode: hybrid
+          autoDelegate: balanced
+        update:
+          enabled: true
+          registry: https://registry.npmjs.org
+          intervalHours: 24
 ```
 
 ## Seeing which model each subagent used
@@ -742,14 +918,15 @@ finished value: no folding in the browser, no polling, no fetch route. That is t
 
 ### The tool
 
-The plugin registers one read-only tool, `model_manager`, with four actions:
+The plugin registers one read-only tool, `model_manager`, with five actions:
 
 | Action | Returns |
 | --- | --- |
-| `report` (default) | A `Top-level agents` table — session id, role, model, reason, live status, and whether the session's model was picked by hand or left at the deployment default — then the per-subagent table: child id, role, model, reason, live status, delegation label, and finally the active mode with subagent-only totals by role/model. |
-| `routes` | Role table (role, effective models, role `note`), the shared selection strategy, active mode, allow-list audit with a YAML snippet for unlisted routes, the vision image-capability check, and the first 8 keywords of each list. |
+| `report` (default) | A `Top-level agents` table — session id, role, model, reason, live status, and whether the session's model was picked by hand or left at the deployment default — then the per-subagent table: child id, role, model, reason, live status, delegation label, and finally the active mode with subagent-only totals by role/model. Carries one update-available line when a newer release was found. |
+| `routes` | Role table (role, effective models, role `note`), the shared selection strategy, active mode, the auto-delegation level, the update-check status line, allow-list audit with a YAML snippet for unlisted routes, the vision image-capability check, and the first 8 keywords of each list. |
 | `usage` | Request and subagent counts per role/model across the whole process, including top-level turns. |
 | `client` | Whether the Host composed this package's Web client half into the browser boot graph, the route serving its bundle, and the current graph revision. Use it when the settings card does not appear. |
+| `update` | Forces a fresh [update check](#automatic-update-checks) and returns installed vs latest, the registry, the timestamp, and — when a newer release exists — the paste-ready upgrade command with the live profile name. Use it whenever `report`/`routes` says an update is available, and relay the command to the user. |
 
 Both `report` and `usage` read **process-local in-memory state**: they answer for the current
 `dsh` process only, and a restart clears them. A subagent that finished before a restart
@@ -929,7 +1106,7 @@ Vision role (image capability):
 
 Delegation labels select the tier. The `description` you pass to a delegation
 becomes the child label, which the manager matches against (word-anchored):
-  vision   : vision, visual, image, images, screenshot, screen shot, ocr, figure, …
+  vision   : vision, visual, image, images, screenshot, screen shot, ocr, diagram, …
   planning : plan, planning, design, architect, architecture, analyse, analyze, analysis, …
   else     : execution
 ```
@@ -1007,15 +1184,20 @@ policy.
   longer matches `"redesign"`, while `screenshot` still matches `"screenshots"` and the
   multi-word `ui mock` still matches. It is not a full-word match, so `plan` still matches
   `"planet"` and `render` still matches `"rendering"`. Prefer distinctive words.
-- Vision is tested before planning, so a label matching both goes to vision.
+- A leading `plan:` / `vision:` prefix is authoritative: it decides the tier before any
+  keyword is consulted. Among keyword matches, vision is tested before planning, so a
+  label matching both goes to `vision`.
+- The built-in vision list has no `figure` — "figure out the bug" is ordinary reasoning
+  work, and a genuine figure-reading unit can say `vision: read figure 3`. Re-add it with
+  `strategy.visionKeywords` if your labels read that way.
 - Regex metacharacters in a keyword are escaped, so `pkg.io` or `a+b` match literally.
 - The matchers are rebuilt on a saved Settings edit, so a keyword change applies live.
 
 The built-in lists, used when a keyword list is absent:
 
 ```text
-vision   (20): vision, visual, image, images, screenshot, screen shot, ocr, figure,
-               diagram, chart, plot, photo, picture, png, jpg, jpeg, webp, gif,
+vision   (19): vision, visual, image, images, screenshot, screen shot, ocr, diagram,
+               chart, plot, photo, picture, png, jpg, jpeg, webp, gif,
                ui mock, render
 planning (24): plan, planning, design, architect, architecture, analyse, analyze,
                analysis, research, investigate, review, critique, strategy, reasoning,
@@ -1029,7 +1211,7 @@ and prints `(disabled)` for an explicitly emptied list:
 ```text
 Delegation labels select the tier. The `description` you pass to a delegation
 becomes the child label, which the manager matches against (word-anchored):
-  vision   : vision, visual, image, images, screenshot, screen shot, ocr, figure, …
+  vision   : vision, visual, image, images, screenshot, screen shot, ocr, diagram, …
   planning : (disabled)
   else     : execution
 ```
@@ -1060,10 +1242,13 @@ Replace a list with the keywords you want, remembering that a patch override rep
 ```
 
 The plugin also contributes a system-prompt section (name `model-manager`, order 60) that
-tells the delegating agent to start a delegation description with `plan:` for reasoning
-work, `vision:` for image work, or leave it plain for execution, and lists each role's
+tells the delegating agent to label a delegation description with `plan:` for thinking
+work, `vision:` for image work, or leave it plain for execution — a leading prefix winning
+over keyword matches — to leave `provider` and `model` unset so the role route applies
+(dropped under `advisory`), and it lists each role's
 effective models (including a fallback). It is empty text when no role has any models, so
-the prompt is not padded with a description of routing that does nothing.
+the prompt is not padded with a description of routing that does nothing; when only the
+planning tier is missing it says so, so a `plan:` label is never a silent no-op.
 
 ## How it stays safe
 
@@ -1107,6 +1292,18 @@ degrades to a notice or a log line.
   accessor and a `try`/`catch`; a missing service means that feature is inert, not that the
   plugin fails. The `agent/request` handler catches its own errors, logs one warning
   (`routing skipped for one request: …`) and returns the request it was given, unchanged.
+- **The delegation policy cannot corrupt a prompt.** The section's text function is wrapped
+  end-to-end and returns `''` on any failure — including a throwing `tools.get` — so the
+  worst case is the pre-0.3.0 prompt with no policy, never a broken assembly. It renders
+  only for depth-0 top-level agents that actually have the delegation tools, and reads the
+  live config, so a volatile save changes it on the next request.
+- **The update check cannot disturb anything.** It starts ~10 s after boot (never on the
+  boot path), runs behind a timeout and a coalescing guard, and every failure path lands
+  in `updateState.status === 'error'` with a reason at info level — offline deployments log
+  one line per interval, not a warning storm. It writes nothing, changes no routing, and a
+  missing `fetch` is just another failed check. The client half's check is gated on
+  `window.location`, browser-only, wrapped in the same `safely` discipline, and its timers
+  (host side) are unref'd or cordis-effect-owned so a test process still exits.
 - **`apply` never throws.** The whole body sits behind a backstop that logs
   `failed to initialise; model routing is disabled: …` and returns, so a misconfiguration
   degrades routing instead of preventing the harness from booting. Malformed configs
@@ -1122,13 +1319,17 @@ degrades to a notice or a log line.
   so `readConfig` returns a `warnings` array and `apply` logs each entry at warn level:
   `unknown config key "bogus" ignored`, `unknown role "nope" ignored`,
   `unknown key "roles.planning.mispelled" ignored`, `unknown key "strategy.nope" ignored`,
+  `unknown key "update.nope" ignored`,
   and the route-level form with its `reasoningEffort` hint.
 - **The pure helpers are exported for testing:** `name`, `Config`, `apply` plus
-  `readConfig`, `applyRoute`, `effectiveRouteOf` and the two default keyword lists.
+  `readConfig`, `applyRoute`, `effectiveRouteOf`, `parseVersion`, `compareVersions`,
+  `installedVersion`, `profileHint`, `delegationPolicyText` and the two default keyword
+  lists.
 - **It does not touch the subagent allow-list row**, precisely to avoid the duplicate
   loader entry id that would abort startup.
 - **The `model_manager` tool is read-only.** Its description says so and the
-  implementation only reads state.
+  implementation only reads state — the `update` action forces a network check but writes
+  nothing.
 
 ## Testing
 
@@ -1136,16 +1337,18 @@ degrades to a notice or a log line.
 npm test
 ```
 
-Runs eight suites in child processes and aggregates the result — **683 assertions** at the time
+Runs ten suites in child processes and aggregates the result — **848 assertions** at the time
 of writing. Each suite also runs on its own: `node test/<name>.test.mjs`.
 
 | Suite | Assertions | What it pins |
 | --- | --- | --- |
-| `packaging.test.mjs` | 31 | The package identity that nothing else cross-checks: the scoped name is the one string the bundle patch's loader row, the client half's module id and the host half's `PACKAGE_NAME` must all agree on, while the cordis row id, the client row namespace and the locale namespace must all *stay* unscoped. Plus publishability (not private, public access, a real `@deepseek-ai/dsh` version gate, schemastery still optional) and tarball completeness — every `exports` target and every `files` pattern resolved against disk, so a published package cannot mount-less. The gate is not string-matched: a self-validating semver comparator (prerelease-aware, and checked against the ordering trap first) proves the declared range admits 0.1.7-rc.2, 0.2.0-rc.2 **and** 0.2.0 while refusing 0.1.6 and 0.3.0 — because `<0.2.0` reads as "every 0.2.0 prerelease" while excluding 0.2.0 itself. Each identity assertion was mutation-checked: breaking any one of the four name sites, or "tidying" the row id or locale namespace to match, fails exactly one assertion; reverting the upper bound to `<0.2.0` fails exactly two. |
-| `routing.test.mjs` | 9 | The four roles route as documented; label classification; an explicit child route is respected; the tool and system-prompt section register; `apply` survives malformed configs. |
-| `edge.test.mjs` | 553 | Hostile configs, keyword anchoring and trimming, explicit-`[]`-disables versus absent-uses-defaults, the 0.2.0 pick migration (legacy per-role values warn and are ignored; the top-level value normalizes), round-robin committing only on apply, LRU eviction, the manager-owned rule, volatile settings reload, every `reason` string, the report/usage/routes output, and the generated allow-list YAML round-tripped through the **real** harness validator. |
-| `failover.test.mjs` | 24 | The failover chain and every guard: it walks to the end of the list and then stops rather than wrapping; `ABORTED`, `INVALID_REQUEST` and `IMAGE_OFFLOAD_REQUIRED` never fail over; a downstream recovery decision is passed through untouched; the per-step cap holds and resets on a new step; `round-robin` does wrap; single-model and disabled roles do nothing; a route outside the role's list is left alone; hostile payloads never throw; subagent chains fail over too. |
-| `client-structure.test.mjs` | 35 | The client half loads through `window.__ModuleLoader__`, requires **only** `react`, exports `{ inject, apply }`, registers its locale dictionaries and exactly two surfaces, and — because the check mirrors the real `SlotCore.register` validation — fails if a registration ever loses its `name`. It also declares each `remote.<namespace>` used must appear in `inject`, drives the settings-form bindings, renders the usage surface against a stubbed projection face in both its collapsed and expanded states (an empty-projection case proving those render assertions are not vacuous), and pins the 0.2.0 card shape: exactly one shared selection control writing the top-level `pick`, with no per-role pick control left anywhere in the tree. |
+| `packaging.test.mjs` | 35 | The package identity that nothing else cross-checks: the scoped name is the one string the bundle patch's loader row, the client half's module id and the host half's `PACKAGE_NAME` must all agree on, while the cordis row id, the client row namespace and the locale namespace must all *stay* unscoped. Plus publishability (not private, public access, a real `@deepseek-ai/dsh` version gate, schemastery still optional) and tarball completeness — every `exports` target and every `files` pattern resolved against disk, so a published package cannot mount-less. The gate is not string-matched: a self-validating semver comparator (prerelease-aware, and checked against the ordering trap first) proves the declared range admits 0.1.7-rc.2, 0.2.0-rc.2 **and** 0.2.0 while refusing 0.1.6 and 0.3.0 — because `<0.2.0` reads as "every 0.2.0 prerelease" while excluding 0.2.0 itself. 0.3.0 also pins the release plumbing both halves share: the client's `VERSION` constant equals `package.json` (a drift would ship a lying update banner), both halves fetch the same percent-encoded packument path, and the bundle patch carries the new `autoDelegate`/`update` defaults. |
+| `routing.test.mjs` | 10 | The four roles route as documented; label classification (including a leading `plan:` beating vision keywords under `hybrid`); an explicit child route is respected; the tool and **both** system-prompt sections register; `apply` survives malformed configs. |
+| `delegation.test.mjs` | 39 | The auto-delegation policy: config normalization (absent → `balanced`, unrecognised → `balanced`, volatile refs unwrapped), the schema union, section registration and its 550 order, and every rendering gate — children (by `origin` and by `delegationDepth`) get `''`, tool-less scopes get `''`, fork-only scopes still get a policy naming `subagent_fork`, the master switch suppresses it, a volatile save switches levels live, and a throwing `tools.get` degrades to `''` instead of throwing out of a prompt section. Plus tier awareness: the policy delegates the decomposition, states the prefix rule, teaches the omit-`provider` rule (dropped under `advisory`), and never advertises a `plan:` tier with no models behind it. |
+| `update.test.mjs` | 58 | Version parsing and semver comparison (prerelease ordering, numeric identifiers, build-metadata equality, unparseable → `undefined`), `installedVersion` against the real manifest, `profileHint` from a real chdir, update-config normalization (registry sanitization, interval semantics including explicit 0 and the one-minute floor), and the check itself end-to-end with `fetch` mocked: available / up-to-date / older-latest / HTTP failure / malformed packument / rejected fetch / disabled-never-fetches / custom registry, plus the `report`/`routes` status lines, the log levels (available → warn, failure → info), scheduling through the cordis timer API (10 s boot delay, 24 h interval, boot-only, floor, disarm), and a volatile re-arm that immediately re-checks a changed registry. |
+| `edge.test.mjs` | 557 | Hostile configs, keyword anchoring and trimming, the leading-prefix rule (`plan:`/`vision:` beat keyword matches, case-insensitive, whitespace-tolerant; `"figure out"` is no longer an image label), explicit-`[]`-disables versus absent-uses-defaults, the 0.2.0 pick migration (legacy per-role values warn and are ignored; the top-level value normalizes), round-robin committing only on apply, LRU eviction, the manager-owned rule, volatile settings reload, every `reason` string, the report/usage/routes output, and the generated allow-list YAML round-tripped through the **real** harness validator. |
+| `failover.test.mjs` | 28 | The failover chain and every guard: it walks to the end of the list and then stops rather than wrapping; `ABORTED`, `INVALID_REQUEST` and `IMAGE_OFFLOAD_REQUIRED` never fail over; a downstream recovery decision is passed through untouched; the per-step cap holds and resets on a new step; `round-robin` does wrap; single-model and disabled roles do nothing; a route outside the role's list is left alone; hostile payloads never throw; subagent chains fail over too. And the cursor isolation of 0.4.0: a planning failure advances only the planning cursor, so the same session back on `main` starts at `main`'s first model, and re-entering plan mode resumes the worn planning chain. |
+| `client-structure.test.mjs` | 37 | The client half loads through `window.__ModuleLoader__`, requires **only** `react`, exports `{ inject, apply }`, registers its locale dictionaries and exactly three surfaces (settings card, usage surface, update chip — the last of which renders `null` while the update store is idle), and — because the check mirrors the real `SlotCore.register` validation — fails if a registration ever loses its `name`. It also declares each `remote.<namespace>` used must appear in `inject`, drives the settings-form bindings, renders the usage surface against a stubbed projection face in both its collapsed and expanded states (an empty-projection case proving those render assertions are not vacuous), and pins the 0.2.0 card shape: exactly one shared selection control writing the top-level `pick`, with no per-role pick control left anywhere in the tree. The update check itself is gated on `window.location`, so the suite provably never fetches. |
 | `client-diagnostic.test.mjs` | 17 | Every branch of `model_manager` with `action: "client"`, including the two that matter most: a bundle the Host will not serve, and a bundle that serves but registers the wrong id. |
 | `usage-projection.test.mjs` | 42 | The per-session model-usage fold: bucket sums against the harness's own field names, refusal of unsafe or fractional counts without aborting the fold, usage recovered from an embedded stream, separate attribution per provider/model, immutable state transitions, reference stability that suppresses republishing, and both schemas rejecting junk through the only method cordis calls (`.parse`). |
 | `explicit-selection.test.mjs` | 25 | The rule that `main` yields to a hand-picked session model, and nothing else does: respected under `hybrid`, still applied under `managed`, untouched by a respected call in the round-robin rotation, and falling back to the old rewriting behaviour when the projection service is absent, when `stateOf` throws, or when the key was never registered. A disabled manager is checked too. Plus the `Top-level agents` report table: the hand-picked versus default-driven verdict, no orphaned subagent header when no subagent exists, a row that outlives its agent degrading to `unknown, agent no longer live`, and — read back out of the renderer's own source — proof that the reason column is still padded past the longest reason string it can print. |
@@ -1241,3 +1444,22 @@ outside the repository.
 - **The card needs one restart after installing**, because the client-module boot manifest
   caches package metadata per loader specifier until restart. Before that the Settings entry is
   simply absent.
+- **The delegation policy is a prompt, not an enforcement.** `strategy.autoDelegate` changes
+  what the top-level agent is *told*; it cannot make a model delegate, and a strong-willed
+  model can still do the work itself. `eager` is the stronger instruction, not a guarantee.
+  A label is likewise overridable: under `hybrid`, a delegation that names `provider`/`model`
+  keeps that route — which is why the policy now tells the agent to leave those unset on
+  `plan:`/`vision:` units, but it cannot stop a model that insists on naming one. The policy
+  also disappears silently if the harness's subagent tool is renamed
+  (`toolName` in `dsh-tool-subagent` config), because the text function only names tools it
+  can resolve in scope.
+- **The update check sees `dist-tags.latest`, nothing else.** It compares against the
+  `latest` tag on the configured registry, so a newer prerelease (or a `next` tag) is
+  invisible, and an intranet mirror that lags npm will keep reporting "up to date" after a
+  release. The browser banner additionally needs the registry to answer CORS — npmjs and
+  npmmirror do; one that does not simply leaves the client-side surfaces empty while the
+  host log and the tool action still report.
+- **The client banner's "installed" version is the pinned constant.** The browser cannot
+  read `package.json`, so `client.js` pins `VERSION` and a packaging test keeps it equal;
+  a hand-edited checkout that bumps only one side will show a self-inconsistent banner
+  (which the same test refuses to let the repo ship).

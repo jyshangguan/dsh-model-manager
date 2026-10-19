@@ -12,7 +12,7 @@ const plugin = await import(PLUGIN);
 
 const handlers = new Map();
 const registeredTools = [];
-let registeredSection;
+const registeredSections = [];
 
 const services = {
   agents: {
@@ -32,7 +32,7 @@ const services = {
   },
   planMode: { get: (agent) => ({ active: agent.__plan === true }) },
   tools: { register: (tool) => registeredTools.push(tool) },
-  systemPrompt: { section: (section) => { registeredSection = section; return () => {}; } },
+  systemPrompt: { section: (section) => { registeredSections.push(section); return () => {}; } },
 };
 
 const ctx = {
@@ -112,9 +112,14 @@ check(6, 'subagent with an EXPLICIT route -> respected (hybrid)',
     { provider: 'pku-corpus', model: 'deepseek-v4-flash-0731' }),
   { provider: 'pku-corpus', model: 'deepseek-v4-flash-0731' });
 
+check(7, 'subagent "plan: analyse the screenshot design" -> planning (prefix beats keywords)',
+  await request(addChild('child-0005', 'plan: analyse the screenshot design', INHERITED), { ...INHERITED }),
+  { provider: 'pku-corpus', model: 'deepseek-v4-pro-0813' });
+
 console.log('\n--- surface ---');
 console.log(`${registeredTools.length === 1 ? 'PASS' : 'FAIL'}  tool registered: ${registeredTools.map((t) => t.name).join(', ') || '(none)'}`);
-console.log(`${registeredSection !== undefined ? 'PASS' : 'FAIL'}  system prompt section: ${registeredSection?.name ?? '(none)'}`);
+const sectionNames = registeredSections.map((section) => section.name).join(',');
+console.log(`${sectionNames === 'model-manager,model-manager:delegation' ? 'PASS' : 'FAIL'}  system prompt sections: ${sectionNames || '(none)'}`);
 
 const tool = registeredTools.find((t) => t.name === 'model_manager');
 console.log('\n--- action: report ---');

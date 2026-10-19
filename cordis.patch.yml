@@ -38,3 +38,14 @@
             models: []
         strategy:
           mode: hybrid
+          # Auto-delegation policy (0.3.0): off | balanced | eager.
+          # Adds a system-prompt section telling the top-level agent to plan
+          # and dispatch subagents instead of doing everything itself.
+          autoDelegate: balanced
+        # Automatic update check (0.3.0): boot + every intervalHours against
+        # the registry; a newer release is logged and surfaced by the
+        # model_manager tool and the Web card. intervalHours: 0 = boot only.
+        update:
+          enabled: true
+          registry: https://registry.npmjs.org
+          intervalHours: 24

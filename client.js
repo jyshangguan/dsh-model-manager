@@ -56,6 +56,22 @@ window.__ModuleLoader__.load({
     const USAGE_PROJECTION_KEY = 'modelManagerUsage';
     const ROLES = ['main', 'planning', 'execution', 'vision'];
     const MODES = ['hybrid', 'managed', 'advisory'];
+    const DELEGATION_LEVELS = ['off', 'balanced', 'eager'];
+    /**
+     * This package's version, pinned for the browser half. The host reads the
+     * real manifest; the client cannot (no fs), so this constant is the
+     * fallback AND the primary source for the update banner —
+     * test/packaging.test.mjs pins it equal to package.json, so a release that
+     * forgets to bump both fails the suite instead of shipping a wrong banner.
+     */
+    const VERSION = '0.4.0';
+    /**
+     * Registry path of this package. The scoped name is percent-encoded the
+     * way npm serves scoped packuments.
+     */
+    const UPDATE_PACKAGE_PATH = '@darkbear9494%2fdsh-model-manager';
+    const UPDATE_REGISTRY_DEFAULT = 'https://registry.npmjs.org';
+    const UPDATE_FETCH_TIMEOUT_MS = 10_000;
     /**
      * How long to wait for the session-scoped catalog before relying on the
      * global `remote.llm` directory alone. It is a bonus source (it carries
@@ -101,6 +117,20 @@ window.__ModuleLoader__.load({
       pickFirst: 'first — use the top model, fall back down the list',
       pickRoundRobin: 'round-robin — rotate across the list',
       pickHint: 'One strategy for every role. "first" keeps each list as a failover chain; "round-robin" rotates across it.',
+      delegation: 'Auto delegation',
+      delegationOff: 'off — no delegation policy is added',
+      delegationBalanced: 'balanced — delegate multi-step and independent work',
+      delegationEager: 'eager — orchestrate: delegate nearly all substantive work',
+      delegationHint: 'Adds a system-prompt policy telling the top-level agent to plan and dispatch subagents instead of doing everything itself. Delegated children are never encouraged to delegate further; the policy only renders when the agent actually has the delegation tools.',
+      updateTitle: 'Update available',
+      updateBanner: 'Update available: {latest} (installed {current}).',
+      updateCommand: 'Upgrade: dsh plugin --profile <profile> add @darkbear9494/dsh-model-manager@latest, then restart the harness.',
+      updateChip: 'Update: {latest}',
+      updateChipHint: 'A newer @darkbear9494/dsh-model-manager is published. Click for the upgrade command.',
+      updateRecheck: 'Re-check',
+      updateChecking: 'Checking for updates…',
+      updateUpToDate: 'Up to date ({version}).',
+      updateFailed: 'Update check failed: {reason}',
       orderHint: 'Order is the fallback order: the top model is tried first.',
       usageTitle: 'Model usage',
       usageModel: 'Provider / model',
@@ -151,6 +181,20 @@ window.__ModuleLoader__.load({
       pickFirst: 'first — 优先用第一个，失败时按顺序向下回退',
       pickRoundRobin: 'round-robin — 在列表内轮流使用',
       pickHint: '所有角色共用这一个选择方式。"first" 把每个角色的列表当作回退链；"round-robin" 在列表内轮流使用。',
+      delegation: '自动委派',
+      delegationOff: 'off — 不注入任何委派策略',
+      delegationBalanced: 'balanced — 多步骤与可并行的任务交给子智能体',
+      delegationEager: 'eager — 全程编排：几乎所有实质工作都委派出去',
+      delegationHint: '向顶层智能体的系统提示注入委派策略，让它先规划再派发子智能体，而不是事事亲力亲为。被委派的子智能体不会被鼓励继续往下委派；策略只在智能体确实持有委派工具时生效。',
+      updateTitle: '有可用更新',
+      updateBanner: '有可用更新：{latest}（当前 {current}）。',
+      updateCommand: '升级命令：dsh plugin --profile <profile> add @darkbear9494/dsh-model-manager@latest，执行后重启。',
+      updateChip: '更新：{latest}',
+      updateChipHint: '已发布更新的 @darkbear9494/dsh-model-manager。点击查看升级命令。',
+      updateRecheck: '重新检查',
+      updateChecking: '正在检查更新…',
+      updateUpToDate: '已是最新（{version}）。',
+      updateFailed: '更新检查失败：{reason}',
       orderHint: '列表顺序即回退顺序：排在最前的模型优先使用。',
       usageTitle: '模型用量',
       usageModel: '提供方 / 模型',
@@ -307,6 +351,31 @@ window.__ModuleLoader__.load({
       error: { fontSize: '0.76rem', color: 'var(--dsw-alias-state-error-primary)' },
       ok: { fontSize: '0.76rem', color: 'var(--dsw-alias-state-success-primary)' },
       summary: { fontSize: '0.8rem', color: 'var(--dsw-alias-label-secondary)' },
+      // The update banner: a warn-toned block with the upgrade command and a
+      // re-check action, so an available release is actionable, not just stated.
+      updateBanner: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.3rem',
+        padding: '0.5rem 0.6rem',
+        borderRadius: 8,
+        border: '1px solid var(--dsw-alias-state-warn-primary)',
+        background: 'var(--dsw-alias-bg-layer-2)',
+        color: 'var(--dsw-alias-state-warn-primary)',
+        fontSize: '0.78rem',
+      },
+      updateBannerHead: { display: 'flex', alignItems: 'baseline', gap: '0.5rem', fontWeight: 600 },
+      updateBannerText: { color: 'var(--dsw-alias-label-primary)', fontFamily: 'ui-monospace, monospace', overflowWrap: 'anywhere' },
+      updateRecheck: {
+        alignSelf: 'flex-start',
+        padding: '0.15rem 0.5rem',
+        borderRadius: 6,
+        border: '1px solid var(--dsw-alias-border-l1)',
+        background: 'var(--dsw-alias-bg-layer-1)',
+        color: 'var(--dsw-alias-label-secondary)',
+        fontSize: '0.74rem',
+        cursor: 'pointer',
+      },
     };
 
     const routeKey = (provider, model) => `${provider}\u0000${model}`;
@@ -502,6 +571,107 @@ window.__ModuleLoader__.load({
       safely('adapter updates', () => use(() => ctx.remote.$on('llm/adapters-updated', () => void loadCatalog()), 'model-manager: adapter updates'));
       safely('settings updates', () => use(() => ctx.remote.$on('settings/document-updated', () => void loadCatalog()), 'model-manager: settings updates'));
 
+      // -- update check --------------------------------------------------------
+      // The host half checks on its own schedule (log line + model_manager tool
+      // action "update"); the browser cannot read that state, so this half runs
+      // the same comparison itself: one packument fetch per page load, plus one
+      // per settings save (the registry URL is row config) and per manual
+      // re-check. Offline or CORS-blocked deployments simply see no banner —
+      // the host log and the tool action still report the update.
+      const updateListeners = new Set();
+      const updateStore = { status: 'idle' };
+      const publishUpdate = (patch) => {
+        Object.assign(updateStore, patch, { at: Date.now() });
+        for (const listener of [...updateListeners]) {
+          try {
+            listener();
+          } catch {
+            /* a broken subscriber must not break the others */
+          }
+        }
+      };
+      const subscribeUpdate = (listener) => {
+        updateListeners.add(listener);
+        return () => updateListeners.delete(listener);
+      };
+      const getUpdateSnapshot = () => updateStore;
+
+      /** The registry URL from the row config, when the form is bound. */
+      const registryFromForm = () => {
+        try {
+          const snapshot = settingsGetSnapshot();
+          const registry = snapshot?.value?.update?.registry;
+          return typeof registry === 'string' && registry.trim() !== ''
+            ? registry.trim().replace(/\/+$/, '') : undefined;
+        } catch {
+          return undefined;
+        }
+      };
+
+      /** Semver-shaped comparison, mirroring the host half's rules. */
+      const compareClientVersions = (a, b) => {
+        const parse = (input) => {
+          const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(String(input ?? '').trim());
+          return match === null ? undefined : [Number(match[1]), Number(match[2]), Number(match[3]), match[4] ?? ''];
+        };
+        const left = parse(a);
+        const right = parse(b);
+        if (left === undefined || right === undefined) return undefined;
+        for (let index = 0; index < 3; index += 1) {
+          if (left[index] !== right[index]) return left[index] < right[index] ? -1 : 1;
+        }
+        // A release sorts above any prerelease; prerelease identifiers compare
+        // numerically when both are numeric, else in ASCII order.
+        const lp = left[3] === '' ? [] : left[3].split('.');
+        const rp = right[3] === '' ? [] : right[3].split('.');
+        if (lp.length === 0 && rp.length === 0) return 0;
+        if (lp.length === 0) return 1;
+        if (rp.length === 0) return -1;
+        for (let index = 0; index < lp.length || index < rp.length; index += 1) {
+          const x = lp[index];
+          const y = rp[index];
+          if (x === undefined) return -1;
+          if (y === undefined) return 1;
+          const xn = /^\d+$/.test(x);
+          const yn = /^\d+$/.test(y);
+          if (xn && yn) {
+            if (Number(x) !== Number(y)) return Number(x) < Number(y) ? -1 : 1;
+          } else if (xn) return -1;
+          else if (yn) return 1;
+          else if (x !== y) return x < y ? -1 : 1;
+        }
+        return 0;
+      };
+
+      const checkUpdates = async () => {
+        // Browser-only on purpose: a module test (or any non-page host) has no
+        // window.location, and firing a real registry fetch from a test would
+        // make the suite depend on the network.
+        if (typeof window === 'undefined' || window.location === undefined) return;
+        if (typeof fetch !== 'function') return;
+        publishUpdate({ status: 'checking' });
+        try {
+          const registry = registryFromForm() ?? UPDATE_REGISTRY_DEFAULT;
+          const signal = typeof AbortSignal?.timeout === 'function'
+            ? AbortSignal.timeout(UPDATE_FETCH_TIMEOUT_MS) : undefined;
+          const response = await fetch(`${registry}/${UPDATE_PACKAGE_PATH}`, {
+            headers: { accept: 'application/vnd.npm.install-v1+json' },
+            ...(signal === undefined ? {} : { signal }),
+          });
+          if (response?.ok !== true) throw new Error(`HTTP ${response?.status ?? '(no status)'}`);
+          const packument = await response.json();
+          const latest = packument?.['dist-tags']?.latest;
+          if (typeof latest !== 'string' || latest === '') throw new Error('no dist-tags.latest');
+          const order = compareClientVersions(latest, VERSION);
+          if (order === undefined) throw new Error(`unparseable version pair "${latest}" / "${VERSION}"`);
+          if (order > 0) publishUpdate({ status: 'available', latest, current: VERSION, registry });
+          else publishUpdate({ status: 'ok', latest, current: VERSION, registry });
+        } catch (error) {
+          publishUpdate({ status: 'error', reason: error?.message ?? String(error) });
+        }
+      };
+      safely('settings updates (update re-check)', () => use(() => ctx.remote.$on('settings/document-updated', () => void checkUpdates()), 'model-manager: settings update re-check'));
+
       // -- lookups ------------------------------------------------------------
       const modelIn = (provider, model) => {
         for (const group of catalog.groups) {
@@ -535,6 +705,7 @@ window.__ModuleLoader__.load({
       function Card(props) {
         const state = React.useSyncExternalStore(subscribe, getSnapshot);
         const shared = React.useSyncExternalStore(settingsSubscribe, settingsGetSnapshot);
+        const update = React.useSyncExternalStore(subscribeUpdate, getUpdateSnapshot, getUpdateSnapshot);
         const [status, setStatus] = React.useState(null);
         const view = props?.view;
         const form = props?.form ?? settingsForm;
@@ -543,6 +714,8 @@ window.__ModuleLoader__.load({
         const roles = isObject(value.roles) ? value.roles : {};
         const mode = isObject(value.strategy) && typeof value.strategy.mode === 'string' ? value.strategy.mode : 'hybrid';
         const pick = value.pick === 'round-robin' ? 'round-robin' : 'first';
+        const autoDelegate = isObject(value.strategy) && DELEGATION_LEVELS.includes(value.strategy.autoDelegate)
+          ? value.strategy.autoDelegate : 'balanced';
 
         const summary = () => {
           const parts = ROLES
@@ -747,6 +920,46 @@ window.__ModuleLoader__.load({
             h('option', { key: 'rr', value: 'round-robin' }, t('pickRoundRobin')))),
           h('span', { style: S.hint }, t('pickHint')));
 
+        // Auto-delegation level: the system-prompt policy that tells the
+        // top-level agent to plan and dispatch subagents. Written the same way
+        // as pick/mode, so a save applies live through the volatile namespace.
+        const delegationControl = h('div', { style: S.row },
+          h('label', { style: S.label }, t('delegation')),
+          h('div', { style: S.controls },
+            h('select', {
+              style: S.select,
+              value: DELEGATION_LEVELS.includes(autoDelegate) ? autoDelegate : 'balanced',
+              disabled: !ready,
+              'aria-label': t('delegation'),
+              onChange: (event) => write([{ op: 'set', path: ['strategy', 'autoDelegate'], value: event.target.value }]),
+            },
+            h('option', { key: 'off', value: 'off' }, t('delegationOff')),
+            h('option', { key: 'balanced', value: 'balanced' }, t('delegationBalanced')),
+            h('option', { key: 'eager', value: 'eager' }, t('delegationEager')))),
+          h('span', { style: S.hint }, t('delegationHint')));
+
+        // The update banner renders from the client-side update store (one
+        // packument fetch per page load), not from the form: the host runs its
+        // own check, and the two agree because both compare against the same
+        // registry packument.
+        let updateBanner = null;
+        if (update.status === 'available') {
+          updateBanner = h('div', { key: 'update', style: S.updateBanner },
+            h('div', { style: S.updateBannerHead }, t('updateTitle')),
+            h('div', { style: S.updateBannerText }, t('updateBanner', { latest: update.latest, current: update.current })),
+            h('div', { style: S.updateBannerText }, t('updateCommand')),
+            h('button', {
+              type: 'button',
+              style: S.updateRecheck,
+              onClick: () => void checkUpdates(),
+            }, t('updateRecheck')));
+        } else if (update.status === 'checking') {
+          updateBanner = h('div', { key: 'update-checking', style: S.notice }, t('updateChecking'));
+        } else if (update.status === 'error' && update.reason !== undefined) {
+          updateBanner = h('div', { key: 'update-error', style: S.notice },
+            t('updateFailed', { reason: update.reason }));
+        }
+
         const notices = [];
         if (!ready && snapshot.status === 'ready') notices.push(h('div', { key: 'ro', style: S.notice }, t('readOnly')));
         if (state.status === 'loading') notices.push(h('div', { key: 'load', style: S.notice }, t('loading')));
@@ -783,10 +996,12 @@ window.__ModuleLoader__.load({
           h('span', { style: S.hint }, t('enableHint')));
 
         return h('div', { style: S.root },
+          updateBanner,
           h('p', { style: S.help }, t('help')),
           enableToggle,
           ...ROLES.map((role) => row(role)),
           pickControl,
+          delegationControl,
           modeControl,
           ...notices);
       }
@@ -880,6 +1095,40 @@ window.__ModuleLoader__.load({
         }, UsageView));
       }));
 
+      // -- update-available chip, rendered in the session header ----------------
+      // A persistent, visible prompt while an update is outstanding: the chip
+      // sits next to the usage button and disappears the moment the banner's
+      // store says "up to date". It reads the same client-side update store as
+      // the settings banner, so the two never disagree.
+      function UpdateChip() {
+        const update = React.useSyncExternalStore(subscribeUpdate, getUpdateSnapshot, getUpdateSnapshot);
+        const [open, setOpen] = React.useState(false);
+        if (update?.status !== 'available') return null;
+        return h('span', { style: S.usage }, [
+          h('button', {
+            type: 'button',
+            style: S.usageButton,
+            'aria-haspopup': 'dialog',
+            'aria-expanded': open,
+            title: t('updateChipHint'),
+            onClick: () => setOpen((current) => !current),
+          }, t('updateChip', { latest: update.latest })),
+          ...(open ? [h('div', { style: S.usagePanel, role: 'dialog', 'aria-label': t('updateTitle') }, [
+            h('div', { style: S.usageHead }, [h('span', null, t('updateTitle'))]),
+            h('div', { key: 'line', style: S.usageEmpty },
+              t('updateBanner', { latest: update.latest, current: update.current })),
+            h('div', { key: 'cmd', style: S.usageEmpty }, t('updateCommand')),
+          ])] : []),
+        ]);
+      }
+
+      safely('session update surface', () => ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
+        name: 'conversation.session.header.utilities',
+        id: 'model-manager-update',
+        order: 70,
+        locale: LOCALE_NS,
+      }, UpdateChip)));
+
       safely('settings page', () => use(() => ctx.slots.inject('settings.section', () => {
         const disposer = ctx.slots.register({
           name: 'settings.section',
@@ -909,11 +1158,16 @@ window.__ModuleLoader__.load({
         }
       }));
 
+      // The initial update check runs after the form binds, so a custom
+      // `update.registry` in the row config is honoured on the very first fetch.
+      safely('initial update check', () => void checkUpdates());
+
       // One success line, so the browser console distinguishes "never applied"
       // from "applied but a step failed" (each failed step logs its own
       // `[model-manager] <step>: <error>` warning immediately above this).
       try {
-        console.log('[model-manager] client half applied; locale registered, 2 surfaces awaited (settings section, session header utilities)');
+        console.log('[model-manager] client half applied; locale registered, 3 registrations across 2 '
+          + 'surfaces (settings section; session header utilities: usage + update chip)');
       } catch {
         /* logging is best-effort */
       }

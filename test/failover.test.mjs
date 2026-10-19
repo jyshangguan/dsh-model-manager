@@ -217,6 +217,21 @@ console.log('\n=== G. a failure on a route outside the role list is not ours ===
   check('G1 no failover for a route the role does not own', (await w.requestError(a, 'SERVER')) === undefined, 'retry', undefined);
 }
 
+console.log('\n=== G2. one role\'s wear never shifts another role\'s chain ===');
+{
+  const w = makeWorld();
+  plugin.apply(w.ctx, cfg({ main: { models: [M('M1'), M('M2')] }, planning: { models: [M('P1'), M('P2')] } }));
+  const a = w.addAgent('s-g2', M('M1'));
+  a.__plan = true;
+  check('G2a plan mode serves the planning chain', routeOf(await w.request(a, M('M1'))) === `${PK}/P1`, routeOf(a.__header), `${PK}/P1`);
+  await w.requestError(a, 'SERVER');
+  check('G2b the planning failure advances the planning cursor only', routeOf(await w.request(a, M('M1'))) === `${PK}/P2`, routeOf(a.__header), `${PK}/P2`);
+  a.__plan = false;
+  check('G2c back on main, main starts from its own first model', routeOf(await w.request(a, M('M1'))) === `${PK}/M1`, routeOf(a.__header), `${PK}/M1`);
+  a.__plan = true;
+  check('G2d re-entering plan mode resumes the worn planning chain', routeOf(await w.request(a, M('M1'))) === `${PK}/P2`, routeOf(a.__header), `${PK}/P2`);
+}
+
 console.log('\n=== H. robustness ===');
 {
   const w = makeWorld();

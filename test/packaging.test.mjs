@@ -160,5 +160,31 @@ for (const required of ['lib', 'client.js', 'cordis.patch.yml', 'README.md']) {
 check('locale dictionaries exist for both languages',
   existsSync(join(ROOT, 'locale/en.json')) && existsSync(join(ROOT, 'locale/zh.json')));
 
+console.log('\n5. the client half pins this release\'s version');
+// The browser cannot read package.json, so client.js carries a VERSION
+// constant that the update banner compares against the registry. A release
+// that bumps one and not the other ships a banner that lies: this pin makes
+// the drift a test failure instead.
+{
+  const pinned = /const VERSION = '([^']+)';/.exec(client);
+  check('client.js pins exactly this release\'s version',
+    pinned !== null && pinned[1] === manifest.version,
+    pinned === null ? 'no VERSION constant found' : `pinned ${pinned[1]}, manifest ${manifest.version}`);
+  const updatePath = /const UPDATE_PACKAGE_PATH = '([^']+)';/.exec(client);
+  // A scoped packument path keeps the `@` literal and percent-encodes only the
+  // scope separator: `/@darkbear9494%2fdsh-model-manager`.
+  const expectedPath = `${NAME.split('/')[0]}%2f${NAME.split('/')[1]}`;
+  check('client.js fetches the package path the registry serves',
+    updatePath !== null && updatePath[1] === expectedPath,
+    updatePath === null ? 'no UPDATE_PACKAGE_PATH found' : updatePath[1]);
+  const hostPath = /const UPDATE_PACKAGE_PATH = '([^']+)';/.exec(host);
+  check('the host half fetches the same package path',
+    hostPath !== null && hostPath[1] === expectedPath,
+    hostPath === null ? 'no UPDATE_PACKAGE_PATH found' : hostPath[1]);
+  check('the bundle patch ships the update defaults for discoverability',
+    patch.includes('autoDelegate: balanced') && patch.includes('intervalHours: 24'),
+    'the patch should carry the new strategy/update defaults, commented or live');
+}
+
 console.log(`\nTALLY: ${passed} passed, ${failed} failed`);
 process.exitCode = failed ? 1 : 0;

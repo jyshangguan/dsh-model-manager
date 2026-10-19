@@ -17,6 +17,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const SUITES = [
   ['packaging', 'packaging.test.mjs', 'package identity, publishability, and tarball completeness'],
   ['routing', 'routing.test.mjs', 'role routing, classification, and the model_manager tool'],
+  ['delegation', 'delegation.test.mjs', 'autoDelegate config, the policy section, and its rendering rules'],
+  ['update', 'update.test.mjs', 'version comparison, update config, scheduling, and the update report'],
   ['edge', 'edge.test.mjs', 'adversarial config, keyword matching, reporting, settings reload'],
   ['failover', 'failover.test.mjs', 'agent/request-error model failover and its guards'],
   ['client-structure', 'client-structure.test.mjs', 'client half load, exports, and slot registration'],

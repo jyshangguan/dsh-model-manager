@@ -130,7 +130,8 @@ const undeclaredNamespaces = [...usedNamespaces].filter((ns) => !declaredNamespa
 console.log(`   remote namespaces used: ${JSON.stringify([...usedNamespaces])}`);
 console.log(`   declared in inject  : ${JSON.stringify([...declaredNamespaces])}`);
 
-const usageRegistration = registerCalls.find((r) => r.options?.name === 'conversation.session.header.utilities');
+const usageRegistration = registerCalls.find((r) => r.options?.name === 'conversation.session.header.utilities'
+  && r.options?.id === 'model-manager-usage');
 let usageProps;
 let usageRendered;
 if (usageRegistration !== undefined) {
@@ -139,6 +140,18 @@ if (usageRegistration !== undefined) {
     usageRendered = usageRegistration.Component(usageProps);
   } catch (error) {
     console.log('   usage surface threw:', error?.message ?? error);
+  }
+}
+
+// The update chip: renders nothing until the client-side update store says a
+// newer version exists, so an offline or up-to-date deployment sees no chip.
+const updateRegistration = registerCalls.find((r) => r.options?.id === 'model-manager-update');
+let updateRendered = 'not-run';
+if (updateRegistration !== undefined) {
+  try {
+    updateRendered = updateRegistration.Component(undefined);
+  } catch (error) {
+    updateRendered = `threw: ${error?.message ?? error}`;
   }
 }
 
@@ -162,11 +175,16 @@ const checks = [
       && JSON.stringify([...localeCalls[0].en].sort()) === JSON.stringify([...localeCalls[0].zh].sort())
       && localeCalls[0].ns === 'dsh-model-manager'],
   ['Settings section slot injected', slotInjects.includes('settings.section')],
-  ['both surfaces are injected', slotInjects.length === 2
+  ['both surfaces are injected (usage + update chip share the header slot)',
+    slotInjects.length === 3
     && slotInjects.includes('settings.section')
-    && slotInjects.includes('conversation.session.header.utilities')],
+    && slotInjects.filter((name) => name === 'conversation.session.header.utilities').length === 2],
   ['settings page registered', registerCalls.some((r) => r.options?.id === 'model-manager' && r.options?.order === 50)],
-  ['exactly two registrations', registerCalls.length === 2],
+  ['exactly three registrations', registerCalls.length === 3],
+  ['update chip registered in the session header',
+    registerCalls.some((r) => r.options?.name === 'conversation.session.header.utilities'
+      && r.options?.id === 'model-manager-update'
+      && r.options?.order === 70)],
   ['settings form bound to row ns', configFormGets.includes('model-manager')],
   ['settings page registered without a whileServed gate', whileServedCalls.length === 0],
   ['adapter invalidation subscribed', remoteOns.includes('llm/adapters-updated')],
@@ -174,6 +192,8 @@ const checks = [
   ['usage surface registered in the session header',
     registerCalls.some((r) => r.options?.name === 'conversation.session.header.utilities'
       && r.options?.id === 'model-manager-usage')],
+  ['the update chip renders nothing while the store is idle', updateRendered === null,
+    String(updateRendered)],
   ['usage surface reads the host projection key', projectionFaces.includes('modelManagerUsage')],
   ['usage inject hands the component a projection face',
     usageProps !== undefined && typeof usageProps.face?.getSnapshot === 'function'],

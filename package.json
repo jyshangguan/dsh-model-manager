@@ -1,8 +1,8 @@
 {
   "name": "@darkbear9494/dsh-model-manager",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "type": "module",
-  "description": "Role-based model manager for DeepSeek Harness: assign models to planning, execution, vision and main roles, route subagent work by role, and report which model every subagent used.",
+  "description": "Role-based model manager for DeepSeek Harness: assign models to planning, execution, vision and main roles, route subagent work by role, report which model every subagent used, prompt the top-level agent to delegate, and check npm for updates.",
   "license": "MIT",
   "keywords": [
     "dsh",
@@ -10,7 +10,9 @@
     "deepseek-harness",
     "cordis",
     "model-routing",
-    "subagent"
+    "subagent",
+    "auto-delegation",
+    "update-check"
   ],
   "repository": {
     "type": "git",
@@ -32,7 +34,7 @@
   },
   "meta": {
     "title": "Model manager",
-    "description": "Assign models to planning, execution, vision and main roles, and see which model each subagent used."
+    "description": "Assign models to planning, execution, vision and main roles, see which model each subagent used, auto-delegate, and get update notices."
   },
   "exports": {
     ".": "./lib/index.js",

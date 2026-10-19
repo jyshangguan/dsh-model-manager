@@ -269,8 +269,11 @@ function makeCtx(options = {}) {
     },
     tools: { register: (tool) => tools.push(tool) },
     systemPrompt: {
+      // 0.3.0 registers TWO sections (routing cheat sheet + delegation
+      // policy), so the mock keeps every registration, in order.
       section: (s) => {
         if (options.sectionThrows) throw new Error('section boom');
+        (state.sections ??= []).push(s);
         state.section = s;
         return () => {};
       },
@@ -791,6 +794,10 @@ section('E. label classification precedence and hostile labels');
     ['E15d multi-word keyword matches ("ui mock")', 'draw a ui mock for the page', 'VIS'],
     ['E15e "render" matches inside a hyphenated word', 're-render the chart', 'VIS'],
     ['E15f leading anchor still allows suffixes ("planning")', 'planning the migration', 'PLAN'],
+    ['E15g leading "plan:" beats vision keywords', 'plan: analyse the screenshots of the UI', 'PLAN'],
+    ['E15h leading "vision:" beats planning keywords', 'vision: review the architecture design', 'VIS'],
+    ['E15i "PLAN:" prefix is case-insensitive after whitespace', '   PLAN: design the migration', 'PLAN'],
+    ['E15j "figure out" is planning work, not an image label', 'figure out the root cause of the crash', 'PLAN'],
   ];
   let anchoredIndex = 0;
   for (const [label, text, want] of anchored) {
@@ -822,7 +829,9 @@ section('F. tools: report / routes / usage / allow-list');
   apply(h0.ctx, cfg({ mode: 'hybrid', roles: { execution: { models: [M('EXEC')] } } }));
   const tool0 = h0.tool();
   check('F1 model_manager tool is registered', tool0 !== undefined, h0.tools.map((t) => t.name), ['model_manager']);
-  check('F2 systemPrompt section is registered', h0.state.section !== undefined && h0.state.section.name === 'model-manager', h0.state.section?.name, 'model-manager');
+  check('F2 both systemPrompt sections are registered',
+    (h0.state.sections ?? []).map((s) => s.name).join(',') === 'model-manager,model-manager:delegation',
+    (h0.state.sections ?? []).map((s) => s.name).join(','), 'model-manager,model-manager:delegation');
   const emptyReport = await tool0.execute({ action: 'report' });
   check('F3 report with zero subagents is the empty-state message', emptyReport.startsWith('No subagents observed yet'), emptyReport.slice(0, 60), 'No subagents observed yet…');
   const emptyUsage = await tool0.execute({ action: 'usage' });
@@ -1225,7 +1234,9 @@ section('G. missing / hostile context surfaces');
   // G13: effect missing but inject present -> the section is registered directly
   const h13 = makeCtx({ effectMissing: true });
   apply(h13.ctx, cfg({ mode: 'managed', roles: { execution: { models: [M('EXEC')] } } }));
-  check('G13 section still registers when ctx.effect is absent', h13.state.section?.name === 'model-manager', h13.state.section?.name, 'model-manager');
+  check('G13 both sections still register when ctx.effect is absent',
+    (h13.state.sections ?? []).map((s) => s.name).join(',') === 'model-manager,model-manager:delegation',
+    (h13.state.sections ?? []).map((s) => s.name).join(','), 'model-manager,model-manager:delegation');
   check('G13b tool still registers when ctx.effect is absent', h13.tool() !== undefined, h13.tools.map((t) => t.name), ['model_manager']);
 
   // G14: inject present, tools missing -> the callback must never fire
