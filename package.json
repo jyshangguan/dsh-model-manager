@@ -1,12 +1,13 @@
 {
   "name": "@darkbear9494/dsh-model-manager",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "type": "module",
-  "description": "Role-based model manager for DeepSeek Harness: assign models to planning, execution, vision and main roles, route subagent work by role, report which model every subagent used, prompt the top-level agent to delegate, and check npm for updates.",
+  "description": "Role-based model manager for DeepSeek Harness: assign models to planning, execution, vision and main roles, route subagent work by role, escalate sessions that invoke a planning skill (grilling / grill-me) to the planning role, report which model every subagent used, prompt the top-level agent to delegate, ship a /autoplan skill that plans on the planning tier then implements on main without stopping for approval, and check npm for updates.",
   "license": "MIT",
   "keywords": [
     "dsh",
     "dsh-plugin",
+    "autoplan",
     "deepseek-harness",
     "cordis",
     "model-routing",
@@ -34,7 +35,7 @@
   },
   "meta": {
     "title": "Model manager",
-    "description": "Assign models to planning, execution, vision and main roles, see which model each subagent used, auto-delegate, and get update notices."
+    "description": "Assign models to planning, execution, vision and main roles, see which model each subagent used, auto-delegate, run /autoplan (plan on the planning tier, then implement on main without an approval gate), and get update notices."
   },
   "exports": {
     ".": "./lib/index.js",
@@ -47,6 +48,7 @@
     "client.js",
     "locale/*.json",
     "cordis.patch.yml",
+    "skills",
     "README.md"
   ],
   "peerDependencies": {

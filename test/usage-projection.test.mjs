@@ -50,9 +50,10 @@ const check = (label, ok, detail) => {
   ok ? passed++ : failed++;
 };
 
-check('both projections were registered', registered.size === 2, [...registered.keys()].join(','));
+check('all three projections were registered', registered.size === 3, [...registered.keys()].join(','));
 check('the usage projection is registered under its key', registered.has('modelManagerUsage'));
 check('the selection projection is registered under its key', registered.has('modelManagerSelection'));
+check('the planning-skill projection is registered under its key', registered.has('modelManagerPlanningSkill'));
 const captured = registered.get('modelManagerUsage');
 if (captured === undefined) {
   console.log('TALLY: ' + passed + ' passed, ' + failed + ' failed');

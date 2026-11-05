@@ -20,10 +20,12 @@
         # `round-robin` rotates across each role's list.
         pick: first
         roles:
-          # Main agent outside plan mode. Empty = leave the composer choice alone.
+          # Main agent outside plan mode and outside an active planning skill.
+          # Empty = leave the composer choice alone.
           main:
             models: []
-          # Plan mode (and delegations labelled as planning/reasoning work).
+          # Plan mode, a session that invoked a listed planning skill (0.5.0),
+          # and delegations labelled as planning/reasoning work.
           planning:
             models:
               - provider: pku-corpus
@@ -38,6 +40,14 @@
             models: []
         strategy:
           mode: hybrid
+          # Planning skills (0.5.0): skills that move the TOP-LEVEL session onto
+          # the planning role for the rest of the session, the way plan mode does.
+          # Omitting the key uses the built-in ['grill-me', 'grilling']; an
+          # explicit [] disables the trigger. Names must be lowercase kebab-case;
+          # anything else is dropped, so a typo cannot match a session by accident.
+          # planningSkills:
+          #   - grill-me
+          #   - grilling
           # Auto-delegation policy (0.3.0): off | balanced | eager.
           # Adds a system-prompt section telling the top-level agent to plan
           # and dispatch subagents instead of doing everything itself.

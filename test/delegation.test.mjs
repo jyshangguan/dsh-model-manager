@@ -1,5 +1,5 @@
 /**
- * Delegation-policy suite for @darkbear9494/dsh-model-manager (0.4.0).
+ * Delegation-policy suite for @darkbear9494/dsh-model-manager (0.5.0).
  *
  * Covers `strategy.autoDelegate`: config normalization, the second
  * system-prompt section, and the per-assembly rendering rules — the policy

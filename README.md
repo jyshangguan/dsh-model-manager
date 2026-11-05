@@ -7,7 +7,12 @@ status. Since 0.3.0 it also **prompts the top-level agent to delegate** (`strate
 and **checks npm for a newer release of itself** (`update`), surfacing an upgrade notice in the
 log, through the `model_manager` tool, on the settings card, and as a chip in the session header.
 Since 0.4.0 the delegation label is a contract, not a hint: a leading `plan:`/`vision:` prefix
-decides the tier outright, and each role's failover chain wears down on its own.
+decides the tier outright, and each role's failover chain wears down on its own. Since 0.5.0 the
+*session* can also pick its own tier: invoking a thinking skill — `grilling`, or the `grill-me`
+alias people type — puts the top-level session on the `planning` role for the rest of the session,
+exactly as plan mode does. Since 0.6.0 it ships one skill of its own: **`/autoplan`** turns the two
+tiers into a workflow — the plan is designed by a `plan:`-labelled fork on the planning model, and
+the main model implements the returned plan immediately, without stopping for approval.
 
 ## What it is
 
@@ -30,9 +35,17 @@ prefix decides the tier before any keyword is consulted, the policy never advert
 with no models behind it, it teaches the delegating agent to leave `provider`/`model` unset
 on tiered units (an explicitly named route overrides the tier under `hybrid`), and the
 failover cursor is tracked per (session, role) so one tier's wear never pushes another tier
-off its first model. It is still deliberately small: one ESM host
-file, one config schema, and one hand-written client file that contributes a
-configuration card to the Plugins page. There is no build step for either half.
+off its first model. 0.5.0 gives the top-level `planning` tier a second trigger besides plan
+mode: a session that invoked one of the skills listed in `strategy.planningSkills` (default
+`['grill-me', 'grilling']`) runs on the planning role's models for the rest of its life, whether
+the intent arrived as a `/grilling` gesture in user text, as the harness's skill injection, or as
+the model's own `skill` tool call — and it is read from a durable session projection, so it
+survives a restart, a resume and a fork. 0.6.0 adds a second, complementary skill: `/autoplan`
+plans on the planning tier and implements on `main` in the same turn, with no approval gate in
+between — the label-driven tiers become a workflow instead of a setting. It is still deliberately
+small: one ESM host file, one config schema, one bundled skill body, and one hand-written client
+file that contributes a configuration card to the Plugins page. There is no build step for either
+half.
 
 ## Install
 
@@ -94,11 +107,14 @@ version and updates the dependency in place.
 
 ### The registry copy
 
-`@darkbear9494/dsh-model-manager@0.4.0` is the current release, public access, the same 8
-files as 0.2.0 (the tarball grew, not the file list: the host half, the client half and this
-README carry the new sections). 0.2.0 packed 63.1 kB with the same 8 files, and 0.1.0, the
-first publish, 62.3 kB. The declared gate is `>=0.1.7-rc.2 <0.3.0`, so every release on the
-0.1.7–0.2.x runtime lines installs without an exemption.
+`@darkbear9494/dsh-model-manager@0.5.0` is the current release on the registry (published
+2026-10-25), public access, the same 8 files as 0.2.0 (the tarball grew, not the file list: the
+host half, the client half and this README carry the new sections). It packs 92.1 kB (292.2 kB
+unpacked) with those 8 files; 0.2.0 packed 63.1 kB, and 0.1.0, the first publish, 62.3 kB. 0.6.0
+is the first release with a bundled skill, so it adds a ninth file —
+`skills/autoplan/SKILL.md` — and packs 97.1 kB (306.5 kB unpacked). The declared gate is
+`>=0.1.7-rc.2 <0.3.0`, so every release on the 0.1.7–0.2.x runtime lines installs without an
+exemption.
 
 Two things learned while publishing it, in case a future version has to be released:
 
@@ -156,7 +172,8 @@ The 0.2.0 line is admitted because the host half is verified against it. Against
 every API this plugin touches is unchanged from 0.1.7-rc.2: `dsh-session-projection`
 (`stateOf`), `dsh-plan-mode`, `dsh-agent`, `dsh-subagent`, `dsh-tool-subagent` +
 `model-selection-settings`, `dsh-tools`, `dsh-llm`, `dsh-session` and `dsh-client-modules` are
-byte-identical, all five subscribed events and every probed service still exist, and all 22
+byte-identical, all six subscribed events (including `agent/pre-step`, whose dispatch and
+decision shapes 0.5.0's skill trigger reads) and every probed service still exist, and all 22
 failover `failure.code` values are still emitted. A real boot on that runtime applied the host
 half, bound every event, resolved every injection and registered the `model_manager` tool. The
 client half is unchanged too: `window.__ModuleLoader__.load({ id, factory })`, the `dsh.client`
@@ -187,7 +204,7 @@ Only a restart picks it up. Remove the old name, install the new one, then resta
 
 | File | Purpose |
 | --- | --- |
-| `lib/index.js` | Host half: Cordis identity `model-manager`, exported `Config`, `apply`, the `agent/request` routing, the `agent/request-error` failover, and the `model_manager` tool. |
+| `lib/index.js` | Host half: Cordis identity `model-manager`, exported `Config`, `apply`, the `agent/request` routing, the `agent/request-error` failover, the `agent/pre-step` planning-skill observer, the three session projections, and the `model_manager` tool. |
 | `client.js` | Client half: the configuration card, contributed as a page in the Settings panel. |
 | `locale/en.json`, `locale/zh.json` | Display metadata only — the bundle's `title` and `description` in the plugin list. |
 | `cordis.patch.yml` | Bundle layer: inserts exactly one row, id `model-manager`. |
@@ -303,17 +320,27 @@ resolves to no route, and requests classified into it pass through unchanged —
 
 | Role | What it is for | When it applies | Bundled default |
 | --- | --- | --- | --- |
-| `main` | The top-level agent outside plan mode. | Requests from a non-subagent session while plan mode is **not** active. | `models: []` (no route — the composer choice is left alone) |
-| `planning` | Reasoning, design, analysis, research. | Top-level requests while plan mode is active; subagents whose label matches a planning keyword (and no vision keyword). | `pku-corpus/qwen3.8-max-0902` |
+| `main` | The top-level agent, outside plan mode and outside any active planning skill. | Requests from a non-subagent session **outside** plan mode and outside any active planning skill. | `models: []` (no route — the composer choice is left alone) |
+| `planning` | Reasoning, design, analysis, research. | Top-level requests while plan mode is active **or** while a listed planning skill (default `grilling` / `grill-me`) has been invoked in the session; subagents whose label matches a planning keyword (and no vision keyword). | `pku-corpus/qwen3.8-max-0902` |
 | `execution` | Default tier for delegated implementation. | Every subagent that matches neither keyword list, including a child with an empty label; also the fallback for vision when `vision` has no models. | `pku-corpus/qwen3.8-flash` |
 | `vision` | Image, screenshot, chart and OCR work. | Subagents whose label matches a vision keyword. | `models: []` (falls back to `execution`) |
+
+A top-level session has two ways onto `planning`, and neither of them is its label:
+the harness's plan mode, and `strategy.planningSkills` — the skills a user invokes to do thinking
+work (`grilling`, plus the `grill-me` alias that loads it). Invoking one counts as entering the
+tier: the session is on `planning` **for the rest of the session**, because the skill's
+instructions stay in context and a grilling interview runs over many turns, not one. There is no
+exit gesture — start a new session, or set `planningSkills: []`, which is the off switch — and a
+model you hand-picked in the composer still wins under `hybrid`, the same way it does in plan mode.
+See [Planning skills](#planning-skills).
 
 A route is `{ provider, model, reasoningEffort? }`. The top-level `pick` is `first`
 (default) or `round-robin` and applies to every role alike; with one model in a role's list
 it has no effect for that role. Under `first` the list is a failover chain, and since 0.4.0
 the wear position is tracked per **(session, role)**, not per session: a session that failed
 over while it was serving `planning` (plan mode moves one session between `main` and
-`planning` on every request) comes back to `main` still on `main`'s first model. A role may
+`planning` on every request; a planning skill moves it to `planning` and leaves it there) comes
+back to `main` still on `main`'s first model. A role may
 also carry a
 `note` — free text for humans, printed under the role in the `routes` table and never
 used for routing.
@@ -368,8 +395,8 @@ polling on the client, and the numbers survive a restart.
 
 **Layout.** One CSS grid per role, with fixed column tracks `auto minmax(0, 1fr) auto auto` — index, model, effort, actions. That choice is the whole reason the rows line up: in a flex row a control with `flex: 1 1 16rem` takes width from its siblings, so any row that omits one control (a model with no reasoning tiers, a first row with no reorder button) pulls every other row's right edge out of alignment. Under the grid a row with no effort control still emits an empty cell, so the action column sits at the same x everywhere. The two actions are glyphs rather than words, so the column is also the same width in either locale; each keeps an `aria-label` and a native `title`. The add affordance is deliberately unlike a model row — dashed border, no fill, muted text, spanning the value columns.
 
-Each role also carries a hint line (`Top-level agent outside plan mode. Leave unset to keep
-following the composer selection.`, `Used for image, screenshot and OCR work. Pick a model
+Each role also carries a hint line (`Top-level agent outside plan mode and planning skills. …`,
+`Used for image, screenshot and OCR work. Pick a model
 that accepts images.`, …) so the card explains itself without this README open.
 
 The card cannot tell you whether a model accepts images: the session model catalog carries
@@ -561,7 +588,122 @@ matches, vision is tested before planning, so a label matching both lands on `vi
 | `"summarize the changelog"` | nothing | `execution` | `pku-corpus/qwen3.8-flash` |
 
 A non-subagent session is never classified by label: it gets `planning` while plan mode
-is active and `main` otherwise.
+is active **or** while one of `strategy.planningSkills` has been invoked in it — a trigger that
+then holds for the rest of the session — and `main` otherwise. See
+[Planning skills](#planning-skills).
+
+### Planning skills
+
+`strategy.planningSkills` (default `['grill-me', 'grilling']`) is the user-facing half of the
+planning tier: plan mode is the harness declaring that this session is doing thinking work, a
+skill invocation is the user declaring the same thing. Both names ship in the list because
+`grill-me` is the alias a person types and `grilling` is the skill it loads. A subagent is never
+escalated by a skill — a child is classified by its label alone.
+
+**Three signals count**, because DSH commits each of them before the request it can influence:
+
+| Signal | Read from | Escalates |
+| --- | --- | --- |
+| The injected skill message — `user/message` with `source.kind: 'skill-invocation'` and `source.name` | the durable fold **and** `agent/pre-step` | the step that carries the gesture |
+| A `/name` gesture in direct user text | the same two | the same step |
+| A model-invoked `skill` tool call — `tool/call`, name `skill`, JSON `arguments.name` | the durable fold | the **next** request of that session |
+
+Recognition uses the harness's own grammar, kept byte-identical to `dsh-tool-skill`'s: a skill
+name is lowercase kebab-case (`[a-z0-9]+(-[a-z0-9]+)*`) and the gesture is a `/name` standing
+alone between whitespace. So "grill me on this" written in prose matches nothing, while the
+`skill` call the model then makes does — one request later, once that call is in the log.
+
+**Why the first request needs a second hook.** DSH fires `agent/pre-step` *before*
+`agent/request`, and commits the step's user batch — the skill injection included — only *after*
+`agent/request` returns (`dsh-agent-loop`: `preStep()` → `prepareRequest()` →
+`session.append('user/message')`). A fold-only design would therefore serve the first, and most
+important, request of a `/grilling` turn on `main`. So the plugin registers a prepended,
+observe-only `agent/pre-step` listener that records every skill name in the step's batches and
+returns the harness's decision untouched. `{ prepend: true }` is what lets it see the injections
+at all: `dsh-tool-skill` registers as an inner hook, so a normally ordered listener would run
+inside it and never receive them. That map is per-process and is dropped with the agent on
+`agent/disposed`.
+
+**Why the trigger survives a restart.** The durable half is a third session projection,
+`modelManagerPlanningSkill`, folded from the `user/message` and `tool/call` events. It stores
+*every* skill name the session invoked, not just the configured planning ones, because membership
+is decided against the **live** config on every request: adding a name to `planningSkills` reaches
+a session that invoked it an hour ago, and `[]` switches the trigger off on the next request
+without a restart. Both halves are append-only, which is what makes the trigger **sticky for the
+rest of the session** — the way entering plan mode is, and for the same reason: the skill's
+instructions stay in context and its interview runs over many turns. Plan mode is consulted first,
+so a session that is in plan mode *and* has been grilled records trigger `plan-mode`; the role is
+`planning` either way.
+
+Normalization follows the keyword lists, with one addition: entries are trimmed, lowercased and
+de-duplicated, and anything that is not a kebab-case skill name is dropped, so a typo in the list
+can never match a session by accident. An absent or non-list value uses the defaults; an explicit
+`[]` — or a list whose every entry was dropped — disables the trigger.
+
+**What you can see of it.** The host logs one line per switch rather than per request
+(`planning skill "grilling" is active in this session; top-level requests route as planning`),
+`model_manager(action: "routes")` prints the live list on its `Planning skills:` line, and
+`model_manager(action: "report")` adds a `Planning skill trigger: <session> → <skill>` line under
+the `Top-level agents` table for any session that got there through a skill. The system-prompt
+cheat sheet says the same, but only while the planning role actually has models behind it.
+
+**It is a routing aid, not enforcement.** It decides which *role* a top-level request is
+classified into, and nothing else. It cannot make a model think better, and under `hybrid` a model
+you hand-picked in the composer still serves the session: the report row shows role `planning`
+with reason `explicit session selection (respected)` and your route, exactly as it does in plan
+mode. There is no exit gesture — start a new session, or set `planningSkills: []`.
+
+### The `/autoplan` skill
+
+`grilling` makes a session *think* on the planning tier; `/autoplan` makes it *think and then act*
+without a review step. It is a **bundled skill**: the plugin registers it as a DSH runtime skill
+through `ctx.skills.register` at startup, so installing the plugin is the whole install. Typing
+`/autoplan <task>` in a session injects its body exactly like `dsh-tool-skill` injects any other
+skill (the host recognises the `/name` gesture in direct user text, and the skill is
+`userInvocable`); a model can also load it through the `skill` tool when the user asks to
+plan-and-implement in one shot. The body ships as `skills/autoplan/SKILL.md`, read once at apply
+time.
+
+**The two phases use the two tiers, not a model swap mid-session:**
+
+| Phase | Who runs it | Which model |
+| --- | --- | --- |
+| Plan | one `subagent_fork` the top-level agent dispatches, description `plan: design the implementation plan for <task>` | the `planning` role — the `plan:` label is the existing contract |
+| Implement | the top-level session itself (or plain execution-tier units, per the delegation policy) | the `main` role |
+
+The fork inherits the conversation, so the planner starts with every fact the main model already
+gathered; it returns a decision-complete plan (goal, success criteria, changes by subsystem,
+edge cases, tests, assumptions). The main model then implements it and reports what changed,
+what it ran, and which assumptions it made on the user's behalf. The skill explicitly forbids
+the things that would turn this into an approval flow: no `ask_user_question` to approve the
+plan, no entering or exiting plan mode, no waiting. `autoplan` is deliberately **not** in
+`strategy.planningSkills` — that list pins the whole session to the planning tier, while here the
+top level must end up on `main` to implement.
+
+**Why not switch the session's own model?** That was the other design: escalate the session to
+`planning` on the gesture, then demote it when the plan is done. It needs a phase state machine,
+a durable projection to survive restart, and a demotion trigger the manager cannot actually
+observe — it would depend on the model remembering to call a marker tool, and a model that
+forgets it leaves the whole session stuck on the expensive tier. Routing on the delegation label
+already switches models per unit, and a fork carries the full conversation, so the two-phase
+workflow needs no new state at all.
+
+**Boundaries.** `/autoplan` skips *plan review*, not safety: approval prompts for risky
+operations, sandbox limits and destructive-operation confirmations still apply, and the body says
+so. Inside plan mode the plan-mode rules win — there the plan still goes through `exit_plan_mode`.
+If the planning role has no models, the `plan:` unit simply keeps the inherited route and the flow
+still runs. If `subagent_fork` is not in scope, the body falls back to plain `subagent` with a
+self-contained prompt.
+
+**Overrides and degradation.** The built-in copy is a runtime skill at DSH's runtime rank (250):
+a project-level `.dsh/skills/autoplan/SKILL.md` (rank 100) or `.agents/skills/autoplan/` (200)
+overrides it, but a `~/.dsh/skills/autoplan/` copy (rank 400) does **not** — that precedence is
+DSH's, and it is the one surprising part of customising this skill. Registration is optional and
+never load-bearing: no skills service in the composition, a throwing `register()`, or a missing or
+malformed `SKILL.md` all degrade to a logged warning, and `model_manager(action: "routes")` prints
+an `Autoplan skill: registered` / `not registered (…)` line so you can tell which case you are in.
+Registering the skill is not routing: it happens even with `enabled: false`, where only the model
+switch stops.
 
 ### The vision → execution fallback
 
@@ -794,6 +936,7 @@ Complete key set, with the schema defaults shown in comments:
       mode: hybrid            # default: hybrid; "hybrid" | "managed" | "advisory"
       # visionKeywords: omitted = the 20 built-ins; any list you write replaces them
       # planningKeywords: omitted = the 24 built-ins; [] DISABLES that classifier
+      # planningSkills: omitted = ['grill-me', 'grilling']; [] DISABLES the trigger
       historyLimit: 300       # default: 300; any positive value floors to at least 1
       autoDelegate: balanced  # default: balanced; "off" | "balanced" | "eager" — the delegation policy
     update:                   # 0.3.0 — automatic update check
@@ -802,9 +945,12 @@ Complete key set, with the schema defaults shown in comments:
       intervalHours: 24       # default: 24; explicit 0 = check at boot only
 ```
 
-The two keyword lists are shown commented out because their default is the built-in list
-rather than a literal value: omitting the key keeps the built-ins, while writing any list —
-including `[]` — replaces them, and `[]` switches that classifier off entirely.
+The three lists are shown commented out because their default is a built-in list rather than a
+literal value: omitting the key keeps the built-ins, while writing any list — including `[]` —
+replaces them, and `[]` switches that classifier or trigger off entirely. `planningSkills` differs
+in one way: its entries are normalized — trimmed, lowercased, de-duplicated, anything that is not
+a kebab-case skill name dropped — so a list whose entries are all invalid is exactly the same as
+`[]`. See [Planning skills](#planning-skills).
 
 Behaviours of the `update` block worth knowing:
 
@@ -833,6 +979,12 @@ Behaviours of `readConfig` worth knowing:
   individual route. A route written with the snake_case alias is called out by name —
   `unknown key "roles.planning.models[].reasoning_effort" ignored — the key is
   "reasoningEffort"`.
+- `strategy.planningSkills` normalizes differently from the keyword lists: entries are trimmed,
+  lowercased, de-duplicated and dropped when they are not kebab-case skill names, so an absent or
+  non-list value means the `['grill-me', 'grilling']` defaults while *any* list replaces them —
+  including one that normalizes down to empty, which is the disabled state. Membership is checked
+  against the live config on every request, so adding a skill and setting `[]` both take effect on
+  the next request with no restart.
 - `historyLimit` accepts any positive number, floored to an integer and raised to a
   minimum of 1, so a fractional value cannot floor to 0 and silently disable usage
   tracking. `0`, a negative number, a non-number or an absent key all mean 300.
@@ -922,8 +1074,8 @@ The plugin registers one read-only tool, `model_manager`, with five actions:
 
 | Action | Returns |
 | --- | --- |
-| `report` (default) | A `Top-level agents` table — session id, role, model, reason, live status, and whether the session's model was picked by hand or left at the deployment default — then the per-subagent table: child id, role, model, reason, live status, delegation label, and finally the active mode with subagent-only totals by role/model. Carries one update-available line when a newer release was found. |
-| `routes` | Role table (role, effective models, role `note`), the shared selection strategy, active mode, the auto-delegation level, the update-check status line, allow-list audit with a YAML snippet for unlisted routes, the vision image-capability check, and the first 8 keywords of each list. |
+| `report` (default) | A `Top-level agents` table — session id, role, model, reason, live status, and whether the session's model was picked by hand or left at the deployment default — then the per-subagent table: child id, role, model, reason, live status, delegation label, and finally the active mode with subagent-only totals by role/model. Under the top-level table it names any session that is on `planning` because of a planning skill (`Planning skill trigger: <session> → <skill>`). Carries one update-available line when a newer release was found. |
+| `routes` | Role table (role, effective models, role `note`), the shared selection strategy, active mode, the auto-delegation level, the planning-skill list (`Planning skills: grill-me, grilling — …`, or `(disabled)`), the update-check status line, allow-list audit with a YAML snippet for unlisted routes, the vision image-capability check, and the first 8 keywords of each list. |
 | `usage` | Request and subagent counts per role/model across the whole process, including top-level turns. |
 | `client` | Whether the Host composed this package's Web client half into the browser boot graph, the route serving its bundle, and the current graph revision. Use it when the settings card does not appear. |
 | `update` | Forces a fresh [update check](#automatic-update-checks) and returns installed vs latest, the registry, the timestamp, and — when a newer release exists — the paste-ready upgrade command with the live profile name. Use it whenever `report`/`routes` says an update is available, and relay the command to the user. |
@@ -1001,6 +1153,12 @@ The `reason` column is the outcome for that request:
 | `lineage unresolved (child route respected)` | No delegating parent could be resolved and the child was not manager-owned, so inheritance was not provable and the child kept its route. |
 | `advisory (not applied)` | `advisory` mode classified the request but changed nothing; the model shown is the one actually used. |
 | `passthrough (role unconfigured)` | The role resolved to no route at all, so the request was returned unchanged. |
+
+A planning-skill escalation adds **no reason string**: the row reads exactly as it would in plan
+mode — `applied`, or `explicit session selection (respected)` when a hand-picked composer model is
+running — and the skill is named on its own line under the table,
+`Planning skill trigger: <session> → <skill>`, which appears only for sessions that reached
+`planning` through a skill.
 
 Verbatim example rows for the two reasons not shown above:
 
@@ -1172,7 +1330,9 @@ mistaken for a normal "no routes listed" state.
 ## Tuning the classification
 
 `strategy.visionKeywords` and `strategy.planningKeywords` are the whole classification
-policy.
+policy **for delegated work**. A subagent is classified by its label and nothing else; the
+top-level tier comes from plan mode and `strategy.planningSkills`, documented under
+[Planning skills](#planning-skills).
 
 - **An absent key uses the built-ins. An explicit `[]` disables that classifier.** That
   is the only way to switch one off: `visionKeywords: []` sends every vision word to the
@@ -1248,7 +1408,11 @@ over keyword matches — to leave `provider` and `model` unset so the role route
 (dropped under `advisory`), and it lists each role's
 effective models (including a fallback). It is empty text when no role has any models, so
 the prompt is not padded with a description of routing that does nothing; when only the
-planning tier is missing it says so, so a `plan:` label is never a silent no-op.
+planning tier is missing it says so, so a `plan:` label is never a silent no-op. When
+`planningSkills` is non-empty **and** the planning role has models, the same section adds one
+line saying that a top-level session which invoked one of those skills runs on the planning tier,
+like plan mode; with no models behind the tier it stays quiet rather than advertising a trigger
+that routes nowhere.
 
 ## How it stays safe
 
@@ -1288,10 +1452,15 @@ degrades to a notice or a log line.
   shape change degrades to "unset" rather than a render error.
 - **Every optional integration is probed and wrapped.** Plan mode, the agent list and
   lineage, the parent's request header, subagent listing, the allow-list service, the
-  model-capability lookup, `tools` and `systemPrompt` are each reached through a guarded
-  accessor and a `try`/`catch`; a missing service means that feature is inert, not that the
-  plugin fails. The `agent/request` handler catches its own errors, logs one warning
+  model-capability lookup, the `sessionProjections` registry the planning-skill fold is read
+  from, `tools`, `systemPrompt` and the `skills` registry the `/autoplan` skill is registered
+  on are each reached through a guarded accessor and a `try`/`catch`; a missing service means
+  that feature is inert, not that the plugin fails. The `agent/request` handler catches its own errors, logs one warning
   (`routing skipped for one request: …`) and returns the request it was given, unchanged.
+  The `agent/pre-step` observer is observe-only: it wraps its own scan in a `try`, never
+  touches the decision it returns, and ignores a rejected step. Without the projection registry
+  the skill trigger falls back to the in-process pre-step signal alone, so it stops surviving a
+  restart; without either signal the session simply stays on `main`.
 - **The delegation policy cannot corrupt a prompt.** The section's text function is wrapped
   end-to-end and returns `''` on any failure — including a throwing `tools.get` — so the
   worst case is the pre-0.3.0 prompt with no policy, never a broken assembly. It renders
@@ -1323,8 +1492,9 @@ degrades to a notice or a log line.
   and the route-level form with its `reasoningEffort` hint.
 - **The pure helpers are exported for testing:** `name`, `Config`, `apply` plus
   `readConfig`, `applyRoute`, `effectiveRouteOf`, `parseVersion`, `compareVersions`,
-  `installedVersion`, `profileHint`, `delegationPolicyText` and the two default keyword
-  lists.
+  `installedVersion`, `profileHint`, `delegationPolicyText`, `skillNamesOfEvent` — the skill
+  fold's whole recognizer, so the gesture, injection and `tool/call` paths are testable without
+  a session — and the three default lists (vision keywords, planning keywords, planning skills).
 - **It does not touch the subagent allow-list row**, precisely to avoid the duplicate
   loader entry id that would abort startup.
 - **The `model_manager` tool is read-only.** Its description says so and the
@@ -1337,12 +1507,12 @@ degrades to a notice or a log line.
 npm test
 ```
 
-Runs ten suites in child processes and aggregates the result — **848 assertions** at the time
+Runs twelve suites in child processes and aggregates the result — **993 assertions** at the time
 of writing. Each suite also runs on its own: `node test/<name>.test.mjs`.
 
 | Suite | Assertions | What it pins |
 | --- | --- | --- |
-| `packaging.test.mjs` | 35 | The package identity that nothing else cross-checks: the scoped name is the one string the bundle patch's loader row, the client half's module id and the host half's `PACKAGE_NAME` must all agree on, while the cordis row id, the client row namespace and the locale namespace must all *stay* unscoped. Plus publishability (not private, public access, a real `@deepseek-ai/dsh` version gate, schemastery still optional) and tarball completeness — every `exports` target and every `files` pattern resolved against disk, so a published package cannot mount-less. The gate is not string-matched: a self-validating semver comparator (prerelease-aware, and checked against the ordering trap first) proves the declared range admits 0.1.7-rc.2, 0.2.0-rc.2 **and** 0.2.0 while refusing 0.1.6 and 0.3.0 — because `<0.2.0` reads as "every 0.2.0 prerelease" while excluding 0.2.0 itself. 0.3.0 also pins the release plumbing both halves share: the client's `VERSION` constant equals `package.json` (a drift would ship a lying update banner), both halves fetch the same percent-encoded packument path, and the bundle patch carries the new `autoDelegate`/`update` defaults. |
+| `packaging.test.mjs` | 37 | The package identity that nothing else cross-checks: the scoped name is the one string the bundle patch's loader row, the client half's module id and the host half's `PACKAGE_NAME` must all agree on, while the cordis row id, the client row namespace and the locale namespace must all *stay* unscoped. Plus publishability (not private, public access, a real `@deepseek-ai/dsh` version gate, schemastery still optional) and tarball completeness — every `exports` target and every `files` pattern resolved against disk, so a published package cannot mount-less. The gate is not string-matched: a self-validating semver comparator (prerelease-aware, and checked against the ordering trap first) proves the declared range admits 0.1.7-rc.2, 0.2.0-rc.2 **and** 0.2.0 while refusing 0.1.6 and 0.3.0 — because `<0.2.0` reads as "every 0.2.0 prerelease" while excluding 0.2.0 itself. 0.3.0 also pins the release plumbing both halves share: the client's `VERSION` constant equals `package.json` (a drift would ship a lying update banner), both halves fetch the same percent-encoded packument path, and the bundle patch carries the new `autoDelegate`/`update` defaults. |
 | `routing.test.mjs` | 10 | The four roles route as documented; label classification (including a leading `plan:` beating vision keywords under `hybrid`); an explicit child route is respected; the tool and **both** system-prompt sections register; `apply` survives malformed configs. |
 | `delegation.test.mjs` | 39 | The auto-delegation policy: config normalization (absent → `balanced`, unrecognised → `balanced`, volatile refs unwrapped), the schema union, section registration and its 550 order, and every rendering gate — children (by `origin` and by `delegationDepth`) get `''`, tool-less scopes get `''`, fork-only scopes still get a policy naming `subagent_fork`, the master switch suppresses it, a volatile save switches levels live, and a throwing `tools.get` degrades to `''` instead of throwing out of a prompt section. Plus tier awareness: the policy delegates the decomposition, states the prefix rule, teaches the omit-`provider` rule (dropped under `advisory`), and never advertises a `plan:` tier with no models behind it. |
 | `update.test.mjs` | 58 | Version parsing and semver comparison (prerelease ordering, numeric identifiers, build-metadata equality, unparseable → `undefined`), `installedVersion` against the real manifest, `profileHint` from a real chdir, update-config normalization (registry sanitization, interval semantics including explicit 0 and the one-minute floor), and the check itself end-to-end with `fetch` mocked: available / up-to-date / older-latest / HTTP failure / malformed packument / rejected fetch / disabled-never-fetches / custom registry, plus the `report`/`routes` status lines, the log levels (available → warn, failure → info), scheduling through the cordis timer API (10 s boot delay, 24 h interval, boot-only, floor, disarm), and a volatile re-arm that immediately re-checks a changed registry. |
@@ -1350,8 +1520,10 @@ of writing. Each suite also runs on its own: `node test/<name>.test.mjs`.
 | `failover.test.mjs` | 28 | The failover chain and every guard: it walks to the end of the list and then stops rather than wrapping; `ABORTED`, `INVALID_REQUEST` and `IMAGE_OFFLOAD_REQUIRED` never fail over; a downstream recovery decision is passed through untouched; the per-step cap holds and resets on a new step; `round-robin` does wrap; single-model and disabled roles do nothing; a route outside the role's list is left alone; hostile payloads never throw; subagent chains fail over too. And the cursor isolation of 0.4.0: a planning failure advances only the planning cursor, so the same session back on `main` starts at `main`'s first model, and re-entering plan mode resumes the worn planning chain. |
 | `client-structure.test.mjs` | 37 | The client half loads through `window.__ModuleLoader__`, requires **only** `react`, exports `{ inject, apply }`, registers its locale dictionaries and exactly three surfaces (settings card, usage surface, update chip — the last of which renders `null` while the update store is idle), and — because the check mirrors the real `SlotCore.register` validation — fails if a registration ever loses its `name`. It also declares each `remote.<namespace>` used must appear in `inject`, drives the settings-form bindings, renders the usage surface against a stubbed projection face in both its collapsed and expanded states (an empty-projection case proving those render assertions are not vacuous), and pins the 0.2.0 card shape: exactly one shared selection control writing the top-level `pick`, with no per-role pick control left anywhere in the tree. The update check itself is gated on `window.location`, so the suite provably never fetches. |
 | `client-diagnostic.test.mjs` | 17 | Every branch of `model_manager` with `action: "client"`, including the two that matter most: a bundle the Host will not serve, and a bundle that serves but registers the wrong id. |
-| `usage-projection.test.mjs` | 42 | The per-session model-usage fold: bucket sums against the harness's own field names, refusal of unsafe or fractional counts without aborting the fold, usage recovered from an embedded stream, separate attribution per provider/model, immutable state transitions, reference stability that suppresses republishing, and both schemas rejecting junk through the only method cordis calls (`.parse`). |
+| `usage-projection.test.mjs` | 43 | The projections this plugin registers — all three of them, `modelManagerUsage`, `modelManagerSelection` and since 0.5.0 `modelManagerPlanningSkill`, each asserted to be registered under its own key — and the per-session model-usage fold: bucket sums against the harness's own field names, refusal of unsafe or fractional counts without aborting the fold, usage recovered from an embedded stream, separate attribution per provider/model, immutable state transitions, reference stability that suppresses republishing, and both schemas rejecting junk through the only method cordis calls (`.parse`). |
 | `explicit-selection.test.mjs` | 25 | The rule that `main` yields to a hand-picked session model, and nothing else does: respected under `hybrid`, still applied under `managed`, untouched by a respected call in the round-robin rotation, and falling back to the old rewriting behaviour when the projection service is absent, when `stateOf` throws, or when the key was never registered. A disabled manager is checked too. Plus the `Top-level agents` report table: the hand-picked versus default-driven verdict, no orphaned subagent header when no subagent exists, a row that outlives its agent degrading to `unknown, agent no longer live`, and — read back out of the renderer's own source — proof that the reason column is still padded past the longest reason string it can print. |
+| `autoplan-skill.test.mjs` | 42 | New in 0.6.0. The bundled `/autoplan` skill: the pure frontmatter parser (`parseSkillMarkdown`) accepting exactly a well-formed SKILL.md — CRLF, edge-trimming, a `---` line inside the body preserved, a `name:` line in the body not mistaken for frontmatter — and returning `undefined` for a missing/unclosed fence, an empty body, an empty description, an invalid name, and every hostile input without throwing; the shipped definition satisfying the runtime contract `dsh-skill` validates on `get()` (kebab name, non-empty description/content, both invocation flags, a string source) and its body carrying the load-bearing instructions (the `plan:`-labelled `subagent_fork`, the no-approval rule, the plan-mode boundary, the `subagent` fallback, the main-tier implementation phase) so it cannot be silently gutted; registration through a mock skills service — exactly once, the shipped definition, an info log naming the skill — and every degradation: a throwing `register()` and a composition with no skills service both leave `apply()` working with a warning, and `routes()` distinguishing registered from not; registration independent of `config.enabled`; and the routing invariant that `/autoplan` is not a planning skill — a top-level session that invoked it stays on the `main` tier, with `/grilling` as the escalating control. The packaging suite additionally pins that `skills/` is in `files` and the body ships. |
+| `planning-skills.test.mjs` | 100 | New in 0.5.0. The skill → top-level `planning` escalation, in eight blocks: the pure event fold `skillNamesOfEvent` over all three records — the `skill-invocation` injection, the `/name` gesture in direct user text, and a model's `skill` `tool/call` with JSON arguments — including the gesture-boundary rules, hostile payloads that record nothing and never throw, and the grammar pinned **byte-identical against the real `dsh-tool-skill`** when a DSH install resolves; `planningSkills` configuration (absent → `grill-me`/`grilling`, explicit `[]` honoured, lowercasing/trimming/de-duplication, invalid names dropped, volatile refs unwrapped, no unknown-key warning either way, and the schema union accepting an array / rejecting anything else); the `modelManagerPlanningSkill` projection (key, `stateVersion`, `init`, folding all three event shapes, mixed-case canonicalization, same-reference returns that suppress republishing, `.parse` rejecting junk); the **live** `agent/pre-step` signal — registered prepended, routing the FIRST request of a gesture step, stickiness across later turns, non-listed skills left on `main`, `[]` disabling it, the enter/reject decision returned by identity, a dozen hostile payloads, a subagent never escalated, `agent/disposed` dropping the live signal, a volatile reload of `[]` applying to the next request, and the info notice firing once per switch; the **durable** signal (a resumed session routing planning from a logged invocation, gesture, or model tool call, a durable name inert under `[]`, and no throw when the projection service is absent); plan mode keeping its own behaviour and owning the trigger when both apply; an explicit composer pick still winning the route while the row records role `planning`; and both diagnostic surfaces — the `Planning skills:` line in `routes` and the `Planning skill trigger:` line in `report`, each in its enabled and disabled form. |
 
 The suites are plain Node scripts — no test framework, and no dependency beyond Node itself.
 
@@ -1377,6 +1549,19 @@ outside the repository.
 - **Leading-boundary matching still matches word prefixes** (`plan` in `"planet"`,
   `render` in `"rendering"`), and the first match wins with vision tested before planning.
   Two classifier lists cannot express precedence beyond that.
+- **The planning-skill trigger is sticky, and there is no exit gesture.** Once a session invokes
+  a listed skill it stays on `planning` for the rest of that session: the durable
+  `modelManagerPlanningSkill` fold records what the session *invoked*, not what is currently in
+  force, and it is append-only. Start a new session, or set `strategy.planningSkills: []`, to opt
+  out. A skill the **model** invoked (through its `skill` tool) escalates only from the next
+  request of that session onward — the `tool/call` event exists only once the model has emitted
+  it, so the step that asked for the skill still runs on the route already chosen.
+- **`/autoplan` is a workflow, not enforcement.** The body is injected as instructions, so the
+  model decides how faithfully to follow it: nothing forces the fork, and nothing stops a model
+  from asking a question anyway. What the plugin does guarantee is the tiers — the `plan:` label
+  routes the planning fork, and the top-level session stays on `main` because `autoplan` is not in
+  `planningSkills`. A project-level skill file of the same name overrides the bundled body
+  entirely (see the override note above).
 - **`hybrid` compares routes by value.** A child that deliberately names the same route as
   the parent's effective route is indistinguishable from one that inherited it, and will
   be rewritten to the role route.
@@ -1422,9 +1607,9 @@ outside the repository.
   at 42 characters with `…`, and `"` becomes `'`.
 - **`roles.<role>.note` affects only the `routes` table.** It is human annotation; no
   routing decision, report or count reads it, and the boot log does not print it.
-- **`main` empty is the simplest policy, and now not the only one.** With `main: []` a
-  top-level turn outside plan mode is never rewritten. With `main` configured under
-  `hybrid`, a session whose model was picked by hand keeps it (see "`main` and the composer's
+- **`main` empty is the simplest policy, and now not the only one.** With `main: []` a top-level
+  turn outside plan mode and outside a planning skill is never rewritten. With `main` configured
+  under `hybrid`, a session whose model was picked by hand keeps it (see "`main` and the composer's
   model picker") and only untouched sessions are rewritten; under `managed` every top-level
   request is rewritten, chosen by hand or not.
 - **The card can only pick what the catalog advertises.** A route the catalog stopped returning keeps its row and stays editable, labelled `(not advertised)`, but you cannot add such a route — or any model absent from the catalog — from the UI. Provider and model are never free text here, so a typo cannot be written into the config; use the patch layer for a route the host does not advertise.

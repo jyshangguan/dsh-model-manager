@@ -154,9 +154,11 @@ const resolves = (pattern) => pattern.includes('*')
 check('every files pattern matches something on disk',
   packed.length >= 5 && packed.every(resolves),
   packed.filter((p) => !resolves(p)).join(', ') || `patterns: ${packed.join(', ')}`);
-for (const required of ['lib', 'client.js', 'cordis.patch.yml', 'README.md']) {
+for (const required of ['lib', 'client.js', 'cordis.patch.yml', 'skills', 'README.md']) {
   check(`files includes ${required}`, packed.includes(required), packed.join(', '));
 }
+check('the bundled /autoplan skill body ships in the package',
+  existsSync(join(ROOT, 'skills', 'autoplan', 'SKILL.md')));
 check('locale dictionaries exist for both languages',
   existsSync(join(ROOT, 'locale/en.json')) && existsSync(join(ROOT, 'locale/zh.json')));
 

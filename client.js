@@ -64,7 +64,7 @@ window.__ModuleLoader__.load({
      * test/packaging.test.mjs pins it equal to package.json, so a release that
      * forgets to bump both fails the suite instead of shipping a wrong banner.
      */
-    const VERSION = '0.4.0';
+    const VERSION = '0.6.0';
     /**
      * Registry path of this package. The scoped name is percent-encoded the
      * way npm serves scoped packuments.
@@ -85,9 +85,9 @@ window.__ModuleLoader__.load({
       summary: 'Model roles',
       help: 'Each role names the model used for that kind of work. Changes apply immediately.',
       roleMain: 'Main model',
-      roleMainHint: 'Top-level agent outside plan mode. Unset keeps the composer in charge. When set, it takes over only sessions that never had a manual pick — a model you chose in the composer keeps running, unless the mode is managed.',
+      roleMainHint: 'Top-level agent outside plan mode and planning skills. Unset keeps the composer in charge. When set, it takes over only sessions that never had a manual pick — a model you chose in the composer keeps running, unless the mode is managed.',
       rolePlanning: 'Planning and reasoning',
-      rolePlanningHint: 'Used in plan mode and for delegations labelled as planning work.',
+      rolePlanningHint: 'Used in plan mode, while a planning skill such as grilling is active, and for delegations labelled as planning work.',
       roleExecution: 'Execution',
       roleExecutionHint: 'The default tier for delegated implementation work.',
       roleVision: 'Image recognition',
@@ -149,9 +149,9 @@ window.__ModuleLoader__.load({
       summary: '模型角色',
       help: '每个角色指定该类工作使用的模型。更改会立即生效。',
       roleMain: '主模型',
-      roleMainHint: '非计划模式下顶层 Agent 使用的模型。留空则完全跟随输入框选择。设置后只接管从未手动选过模型的会话；你在输入框点选过的模型会继续使用，除非分发模式为 managed。',
+      roleMainHint: '非计划模式且没有规划类技能生效时顶层 Agent 使用的模型。留空则完全跟随输入框选择。设置后只接管从未手动选过模型的会话；你在输入框点选过的模型会继续使用，除非分发模式为 managed。',
       rolePlanning: '规划与推理',
-      rolePlanningHint: '计划模式下使用，也用于标记为规划类工作的委派。',
+      rolePlanningHint: '计划模式下使用，规划类技能（如 grilling）生效时也使用，也用于标记为规划类工作的委派。',
       roleExecution: '执行',
       roleExecutionHint: '委派实现的默认档位。',
       roleVision: '图像识别',
