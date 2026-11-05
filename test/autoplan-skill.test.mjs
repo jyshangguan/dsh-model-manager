@@ -334,8 +334,8 @@ console.log('--- E. packaging ---');
     (manifest.files ?? []).join(', '));
   check('E3  the shipped SKILL.md parses to the registered name',
     parseSkillMarkdown(SKILL_TEXT)?.name === 'autoplan');
-  check('E4  the manifest version matches this suite',
-    manifest.version === '0.6.0', manifest.version);
+  check('E4  the manifest carries the 0.6 line',
+    /^0\.6\.\d+$/.test(manifest.version), manifest.version);
 }
 
 console.log(`\nTALLY: ${passed} passed, ${failed} failed`);

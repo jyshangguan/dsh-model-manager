@@ -12,7 +12,9 @@ decides the tier outright, and each role's failover chain wears down on its own.
 alias people type — puts the top-level session on the `planning` role for the rest of the session,
 exactly as plan mode does. Since 0.6.0 it ships one skill of its own: **`/autoplan`** turns the two
 tiers into a workflow — the plan is designed by a `plan:`-labelled fork on the planning model, and
-the main model implements the returned plan immediately, without stopping for approval.
+the main model implements the returned plan immediately, without stopping for approval. Since 0.6.1
+it also follows DSH 0.2's model-selection contract: a route is assigned with `agent.model.select()`
+before the step is prepared, instead of being rewritten at request time (which 0.2 aborts).
 
 ## What it is
 
@@ -704,6 +706,44 @@ malformed `SKILL.md` all degrade to a logged warning, and `model_manager(action:
 an `Autoplan skill: registered` / `not registered (…)` line so you can tell which case you are in.
 Registering the skill is not routing: it happens even with `enabled: false`, where only the model
 switch stops.
+
+### Switching models on DSH 0.2.x
+
+DSH 0.2 moved model selection out of the request waterfall. The loop reads
+`agent.model.current()` at the start of step preparation and fixes
+provider/model/reasoningEffort for that step; an `agent/request` listener that proposes another
+route now **aborts the turn** with
+`agent/request proposed "…" after step preparation fixed "…"; use agent.model.select() before step
+preparation`. 0.6.1 follows the new contract while keeping the 0.1.x path:
+
+| Harness | How a route is applied | `agent/request` |
+| --- | --- | --- |
+| 0.1.x (no `agent.model.select`) | the manager rewrites the proposed route | routing |
+| 0.2.x (`agent.model.select` present) | `agent.model.select()` **before** the step is prepared | observe-only |
+
+On 0.2.x the selection is made at `agent/inbox/claimed`, which is the one moment that beats the
+fix without fighting it: the loop claims a step's input and only then reads the model, and the
+claim notifications are emitted outside the session append being published — a selection made
+there is accepted and lands on the request that is about to run. (A `session/event` listener
+cannot do this: it runs inside the append, where a nested append is refused as reentrant.) A
+second selection at `agent/pre-step` keeps later steps correct — plan mode toggled mid-turn, a
+skill invoked on a later step, a child whose label was not yet known — at the price of landing on
+the *next* step, which is the best any pre-step hook can do.
+
+Consequences worth knowing:
+
+- **A hand-picked model still wins under `hybrid`.** A route is the manager's own when it
+  selected it (`managerSelected`), and the deployment default when it equals the agent's creation
+  options; anything else is a recorded choice and is respected. Ownership is in-process, so after
+  a restart a session whose route the manager had selected reads as hand-picked and is left alone
+  until a turn actually routes it again — `managed` overrides it as always.
+- **Failover cannot retry the same step on another model.** The step's route is fixed, so a
+  failure advances the role's cursor, selects the next model for the next request, and the failing
+  step ends instead of retrying a model already known to be down. The log says so; on 0.1.x the
+  old same-step retry is unchanged.
+- **`routes` reports the transport** on its `Routing transport:` line — `agent.model.select()
+  before step preparation (DSH ≥ 0.2)` or `agent/request route rewrite (DSH 0.1.x)` — read from
+  the live agents, so it states what the running composition is actually doing.
 
 ### The vision → execution fallback
 
@@ -1507,7 +1547,7 @@ degrades to a notice or a log line.
 npm test
 ```
 
-Runs twelve suites in child processes and aggregates the result — **993 assertions** at the time
+Runs thirteen suites in child processes and aggregates the result — **1019 assertions** at the time
 of writing. Each suite also runs on its own: `node test/<name>.test.mjs`.
 
 | Suite | Assertions | What it pins |
@@ -1525,6 +1565,7 @@ of writing. Each suite also runs on its own: `node test/<name>.test.mjs`.
 | `autoplan-skill.test.mjs` | 42 | New in 0.6.0. The bundled `/autoplan` skill: the pure frontmatter parser (`parseSkillMarkdown`) accepting exactly a well-formed SKILL.md — CRLF, edge-trimming, a `---` line inside the body preserved, a `name:` line in the body not mistaken for frontmatter — and returning `undefined` for a missing/unclosed fence, an empty body, an empty description, an invalid name, and every hostile input without throwing; the shipped definition satisfying the runtime contract `dsh-skill` validates on `get()` (kebab name, non-empty description/content, both invocation flags, a string source) and its body carrying the load-bearing instructions (the `plan:`-labelled `subagent_fork`, the no-approval rule, the plan-mode boundary, the `subagent` fallback, the main-tier implementation phase) so it cannot be silently gutted; registration through a mock skills service — exactly once, the shipped definition, an info log naming the skill — and every degradation: a throwing `register()` and a composition with no skills service both leave `apply()` working with a warning, and `routes()` distinguishing registered from not; registration independent of `config.enabled`; and the routing invariant that `/autoplan` is not a planning skill — a top-level session that invoked it stays on the `main` tier, with `/grilling` as the escalating control. The packaging suite additionally pins that `skills/` is in `files` and the body ships. |
 | `planning-skills.test.mjs` | 100 | New in 0.5.0. The skill → top-level `planning` escalation, in eight blocks: the pure event fold `skillNamesOfEvent` over all three records — the `skill-invocation` injection, the `/name` gesture in direct user text, and a model's `skill` `tool/call` with JSON arguments — including the gesture-boundary rules, hostile payloads that record nothing and never throw, and the grammar pinned **byte-identical against the real `dsh-tool-skill`** when a DSH install resolves; `planningSkills` configuration (absent → `grill-me`/`grilling`, explicit `[]` honoured, lowercasing/trimming/de-duplication, invalid names dropped, volatile refs unwrapped, no unknown-key warning either way, and the schema union accepting an array / rejecting anything else); the `modelManagerPlanningSkill` projection (key, `stateVersion`, `init`, folding all three event shapes, mixed-case canonicalization, same-reference returns that suppress republishing, `.parse` rejecting junk); the **live** `agent/pre-step` signal — registered prepended, routing the FIRST request of a gesture step, stickiness across later turns, non-listed skills left on `main`, `[]` disabling it, the enter/reject decision returned by identity, a dozen hostile payloads, a subagent never escalated, `agent/disposed` dropping the live signal, a volatile reload of `[]` applying to the next request, and the info notice firing once per switch; the **durable** signal (a resumed session routing planning from a logged invocation, gesture, or model tool call, a durable name inert under `[]`, and no throw when the projection service is absent); plan mode keeping its own behaviour and owning the trigger when both apply; an explicit composer pick still winning the route while the row records role `planning`; and both diagnostic surfaces — the `Planning skills:` line in `routes` and the `Planning skill trigger:` line in `report`, each in its enabled and disabled form. |
 
+| `model-select.test.mjs` | 26 | New in 0.6.1. DSH 0.2's selection contract: the pure helpers (`sameSelection`, `planningSkillInMessages`, `selectionModelOf`); a claimed user message selects the role's route before the step is prepared — plain prompt → `main`, `/grilling` → `planning`, `/autoplan` → `main`, plan mode → `planning`, round-robin committing only on an applied selection, and a hand-picked composer model respected under `hybrid` while `managed` overrides it; the manager's own selection is not mistaken for a hand-picked one on the next turn; `agent/request` returns the step's fixed route untouched (the 0.2 crash path); `agent/pre-step` corrects the next step; failover selects the next model and does not retry the fixed step; and a 0.1.x agent without a selection surface keeps request-time rewriting. |
 The suites are plain Node scripts — no test framework, and no dependency beyond Node itself.
 
 Two of them optionally pin their expectations against the **real** harness internals rather
@@ -1556,6 +1597,13 @@ outside the repository.
   out. A skill the **model** invoked (through its `skill` tool) escalates only from the next
   request of that session onward — the `tool/call` event exists only once the model has emitted
   it, so the step that asked for the skill still runs on the route already chosen.
+- **Failover is per request, not per step, on DSH 0.2.x.** The route is fixed when a step is
+  prepared, so a provider failure advances the role's cursor and selects the next model for the
+  next request; the failing step ends rather than being retried on another model. On 0.1.x the
+  same-step retry is unchanged. See [Switching models on DSH 0.2.x](#switching-models-on-dsh-02x).
+- **Selection ownership is in-process.** A route the manager selected reads as hand-picked after a
+  restart, because 0.2 records every selection in the same durable event; `managed` overrides it,
+  and the next turn that routes the session re-establishes ownership.
 - **`/autoplan` is a workflow, not enforcement.** The body is injected as instructions, so the
   model decides how faithfully to follow it: nothing forces the fork, and nothing stops a model
   from asking a question anyway. What the plugin does guarantee is the tiers — the `plan:` label

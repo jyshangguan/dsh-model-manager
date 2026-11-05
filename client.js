@@ -64,7 +64,7 @@ window.__ModuleLoader__.load({
      * test/packaging.test.mjs pins it equal to package.json, so a release that
      * forgets to bump both fails the suite instead of shipping a wrong banner.
      */
-    const VERSION = '0.6.0';
+    const VERSION = '0.6.1';
     /**
      * Registry path of this package. The scoped name is percent-encoded the
      * way npm serves scoped packuments.

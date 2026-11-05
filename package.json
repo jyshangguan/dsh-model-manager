@@ -1,8 +1,8 @@
 {
   "name": "@darkbear9494/dsh-model-manager",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "type": "module",
-  "description": "Role-based model manager for DeepSeek Harness: assign models to planning, execution, vision and main roles, route subagent work by role, escalate sessions that invoke a planning skill (grilling / grill-me) to the planning role, report which model every subagent used, prompt the top-level agent to delegate, ship a /autoplan skill that plans on the planning tier then implements on main without stopping for approval, and check npm for updates.",
+  "description": "Role-based model manager for DeepSeek Harness: assign models to planning, execution, vision and main roles, route subagent work by role, escalate sessions that invoke a planning skill (grilling / grill-me) to the planning role, report which model every subagent used, prompt the top-level agent to delegate, ship a /autoplan skill that plans on the planning tier then implements on main without stopping for approval, and switch models through agent.model.select() on DSH 0.2.x, and check npm for updates.",
   "license": "MIT",
   "keywords": [
     "dsh",

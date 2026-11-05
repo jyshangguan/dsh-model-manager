@@ -27,6 +27,8 @@ const SUITES = [
   ['explicit-selection', 'explicit-selection.test.mjs', 'hybrid respects an explicit session model selection'],
   ['planning-skills', 'planning-skills.test.mjs', 'planning skills (grilling / grill-me) escalate the top-level session to the planning tier'],
   ['autoplan-skill', 'autoplan-skill.test.mjs', 'the bundled /autoplan skill: parser, registration, degradation, and the main-tier invariant'],
+
+  ['model-select', 'model-select.test.mjs', 'DSH 0.2.x model selection: turn-boundary select, observe-only request, failover downgrade'],
 ];
 
 const run = (file) => new Promise((resolve) => {
