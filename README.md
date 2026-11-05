@@ -109,12 +109,14 @@ version and updates the dependency in place.
 
 ### The registry copy
 
-`@darkbear9494/dsh-model-manager@0.5.0` is the current release on the registry (published
-2026-10-25), public access, the same 8 files as 0.2.0 (the tarball grew, not the file list: the
-host half, the client half and this README carry the new sections). It packs 92.1 kB (292.2 kB
-unpacked) with those 8 files; 0.2.0 packed 63.1 kB, and 0.1.0, the first publish, 62.3 kB. 0.6.0
-is the first release with a bundled skill, so it adds a ninth file —
-`skills/autoplan/SKILL.md` — and packs 97.1 kB (306.5 kB unpacked). The declared gate is
+`@darkbear9494/dsh-model-manager@0.6.1` is the current release on the registry (published
+2026-11-06), public access, 9 files: the host half, the client half, this README, the two locale
+dictionaries, the bundle patch, `package.json`, `LICENSE`, and `skills/autoplan/SKILL.md` — the
+bundled skill 0.6.0 introduced. 0.6.0 (2026-11-05) was the first release with that ninth file and
+packed 97.1 kB; 0.6.1 packs 102.4 kB (326.9 kB unpacked) with the DSH 0.2 model-selection fix.
+Earlier: 0.5.0 packed 92.1 kB (292.2 kB unpacked) with the same 8 files as 0.2.0 (the tarball
+grew, not the file list), 0.2.0 packed 63.1 kB, and 0.1.0, the first publish, 62.3 kB. The
+declared gate is
 `>=0.1.7-rc.2 <0.3.0`, so every release on the 0.1.7–0.2.x runtime lines installs without an
 exemption.
 
